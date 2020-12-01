@@ -33,3 +33,5 @@ $RECYCLE.BIN/
 # =========================
 # Operating System Files
 # =========================
+/.idea/
+/drivers/ESP32/build/
