@@ -32,7 +32,7 @@
 
 // Number of axes supported: minimum 3, maximum 6
 // If more than 3 axes are required a compliant driver must be provided
-//#define N_AXIS 3 // Number of axes
+#define N_AXIS 3 // Number of axes
 
 // Defines compatibility level with the grbl 1.1 protocol.
 // Additional G- and M-codes are not disabled except when level is set to >= 10.
@@ -490,7 +490,7 @@
 //#define DEFAULT_INVERT_PROBE_PIN
 //#define DEFAULT_LASER_MODE
 //#define DEFAULT_LATHE_MODE
-//#define DEFAULT_HOMING_ENABLE
+#define DEFAULT_HOMING_ENABLE
 //#define DEFAULT_HOMING_ALLOW_MANUAL
 //#define DEFAULT_HOMING_DIR_MASK 0 // move positive dir
 //#define DEFAULT_HOMING_FEED_RATE 25.0f // mm/min
@@ -525,7 +525,7 @@
 // If homing is enabled, homing init lock sets Grbl into an alarm state upon power up. This forces
 // the user to perform the homing cycle (or override the locks) before doing anything else. This is
 // mainly a safety feature to remind the user to home, since position is unknown to Grbl.
-//#define DEFAULT_HOMING_INIT_LOCK // Default disabled. Uncomment to enable.
+#define DEFAULT_HOMING_INIT_LOCK // Default disabled. Uncomment to enable.
 
 // Define the homing cycle patterns with bitmasks. The homing cycle first performs a search mode
 // to quickly engage the limit switches, followed by a slower locate mode, and finished by a short
@@ -542,6 +542,13 @@
 // on separate pin, but homed in one cycle. Also, it should be noted that the function of hard limits
 // will not be affected by pin sharing.
 // NOTE: Defaults are set for a traditional 3-axis CNC machine. Z-axis first to clear, followed by X & Y.
+
+#define HOMING_CYCLE_0 (X_AXIS_BIT|Y_AXIS_BIT)
+#define HOMING_CYCLE_1 0
+#define HOMING_CYCLE_2 0
+#define HOMING_CYCLE_3 0
+#define HOMING_CYCLE_4 0
+#define HOMING_CYCLE_5 0
 
 //#define HOMING_CYCLE_0 (Z_AXIS_BIT)             // REQUIRED: First move Z to clear workspace.
 //#define HOMING_CYCLE_1 (X_AXIS_BIT|Y_AXIS_BIT)  // OPTIONAL: Then move X,Y at the same time.
