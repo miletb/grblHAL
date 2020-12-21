@@ -1328,7 +1328,8 @@ static bool driver_setup (settings_t *settings)
 
     timer_init(STEP_TIMER_GROUP, STEP_TIMER_INDEX, &timerConfig);
     timer_set_counter_value(STEP_TIMER_GROUP, STEP_TIMER_INDEX, 0ULL);
-    timer_isr_register(STEP_TIMER_GROUP, STEP_TIMER_INDEX, stepper_driver_isr, 0, ESP_INTR_FLAG_IRAM, NULL);
+    timer_isr_register(STEP_TIMER_GROUP, STEP_TIMER_INDEX, stepper_driver_isr, 0,
+        ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,  NULL);
     timer_enable_intr(STEP_TIMER_GROUP, STEP_TIMER_INDEX);
 
     /********************
