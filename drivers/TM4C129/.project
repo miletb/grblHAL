@@ -29,7 +29,7 @@
 		<link>
 			<name>third_party/fatfs</name>
 			<type>2</type>
-			<location>C:/ti/TivaWare_C_Series-2.1.4.178/third_party/fatfs</location>
+			<location>/Users/milutinkitic/ti/tivaware_c_series_2_1_4_178/third_party/fatfs</location>
 		</link>
 		<link>
 			<name>utils/lwiplib.c</name>
@@ -80,7 +80,7 @@
 	<variableList>
 		<variable>
 			<name>SW_ROOT</name>
-			<value>file:/C:/ti8/TivaWare_C_Series-2.1.4.178</value>
+			<value>file:/Users/milutinkitic/ti/tivaware_c_series_2_1_4_178</value>
 		</variable>
 	</variableList>
 </projectDescription>
