@@ -1,7 +1,7 @@
 /*
   hal.h - HAL (Hardware Abstraction Layer) entry points structures and capabilities type
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2016-2020 Terje Io
 
@@ -68,7 +68,10 @@ typedef union {
                  probe_connected           :1,
                  atc                       :1,
                  no_gcode_message_handling :1,
-                 unassigned                :4;
+                 dual_spindle              :1,
+                 limits_override           :1,
+                 odometers                 :1,
+                 unassigned                :1;
     };
 } driver_cap_t;
 
@@ -152,6 +155,12 @@ typedef struct {
     limits_get_state_ptr get_state;
     limit_interrupt_callback_ptr interrupt_callback; // set up by core before driver_init() is called.
 } limits_ptrs_t;
+
+// Homing
+
+typedef struct {
+    limits_get_state_ptr get_state;
+} homing_ptrs_t;
 
 // Control signals
 
@@ -241,10 +250,12 @@ typedef struct {
 
 // Encoder (optional)
 
+typedef uint8_t (*encoder_get_n_encoders_ptr)(void);
 typedef void (*encoder_on_event_ptr)(encoder_t *encoder, int32_t position);
 typedef void (*encoder_reset_ptr)(uint_fast8_t id);
 
 typedef struct {
+    encoder_get_n_encoders_ptr get_n_encoders;
     encoder_on_event_ptr on_event;
     encoder_reset_ptr reset;
 } encoder_ptrs_t;
@@ -261,6 +272,7 @@ typedef struct {
     char *board;
     uint32_t f_step_timer;
     uint32_t rx_buffer_size;
+    uint8_t driver_axis_settings;
 
     bool (*driver_setup)(settings_t *settings);
     void (*delay_ms)(uint32_t ms, void (*callback)(void));
@@ -271,6 +283,7 @@ typedef struct {
     void (*irq_disable)(void);
 
     limits_ptrs_t limits;
+    homing_ptrs_t homing;
     coolant_ptrs_t coolant;
     spindle_ptrs_t spindle;
     stepper_ptrs_t stepper;
@@ -344,7 +357,11 @@ typedef void (*on_probe_completed_ptr)(void);
 typedef void (*on_program_completed_ptr)(program_flow_t program_flow);
 typedef void (*on_execute_realtime_ptr)(uint_fast16_t state);
 typedef void (*on_unknown_accessory_override_ptr)(uint8_t cmd);
-typedef void (*on_report_options_ptr)(void);
+typedef void (*on_report_options_ptr)(bool newopt);
+typedef void (*on_report_command_help_ptr)(void);
+typedef void (*on_global_settings_restore_ptr)(void);
+typedef setting_details_t *(*on_report_settings_ptr)(void); // NOTE: this must match the signature of the same definition in
+                                                            // the setting_details_t structure in settings.h!
 typedef void (*on_realtime_report_ptr)(stream_write_ptr stream_write, report_tracking_flags_t report);
 typedef void (*on_unknown_feedback_message_ptr)(stream_write_ptr stream_write);
 typedef bool (*on_laser_ppi_enable_ptr)(uint_fast16_t ppi, uint_fast16_t pulse_length);
@@ -361,6 +378,9 @@ typedef struct {
     on_execute_realtime_ptr on_execute_realtime;
     on_unknown_accessory_override_ptr on_unknown_accessory_override;
     on_report_options_ptr on_report_options;
+    on_report_command_help_ptr on_report_command_help;
+    on_global_settings_restore_ptr on_global_settings_restore;
+    on_report_settings_ptr on_report_settings;
     on_realtime_report_ptr on_realtime_report;
     on_unknown_feedback_message_ptr on_unknown_feedback_message;
     on_unknown_sys_command_ptr on_unknown_sys_command; // return Status_Unhandled if not handled.

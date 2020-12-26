@@ -43,7 +43,7 @@
 //  These can be found in in this file and in defaults.h.
 // Set to 10 to also disable new coordinate system offsets (G59.1 - G59.3) and some $# report extensions.
 // NOTE: if switching to a level > 1 please reset non-volatile storage with $RST=* after reflashing!
-//#define COMPATIBILITY_LEVEL 0
+#define COMPATIBILITY_LEVEL 0
 
 //#define KINEMATICS_API // Remove comment to add HAL entry points for custom kinematics
 
@@ -202,6 +202,7 @@
 // new incoming motions as they are executed.
 // #define BLOCK_BUFFER_SIZE 16 // Uncomment to override default in planner.h.
 #define BLOCK_BUFFER_SIZE 512 // Uncomment to override default in planner.h.
+// #define BLOCK_BUFFER_SIZE 36 // Uncomment to override default in planner.h.
 
 // Governs the size of the intermediary step segment buffer between the step execution algorithm
 // and the planner blocks. Each segment is set of steps executed at a constant velocity over a
@@ -211,6 +212,7 @@
 // before having to come back and refill this buffer, currently at ~50msec of step moves.
 // #define SEGMENT_BUFFER_SIZE 6 // Uncomment to override default in stepper.h.
 #define SEGMENT_BUFFER_SIZE 128 // Uncomment to override default in stepper.h.
+// #define SEGMENT_BUFFER_SIZE 10 // Uncomment to override default in stepper.h.
 
 // Configures the position after a probing cycle during Grbl's check mode. Disabled sets
 // the position to the probe target, when enabled sets the position to the start position.
@@ -347,6 +349,7 @@
 //#define DEFAULT_TOOLCHANGE_PROBING_DISTANCE 30  // max probing distance in mm for mode 3
 //#define DEFAULT_TOOLCHANGE_FEED_RATE 25.0f      // mm/min
 //#define DEFAULT_TOOLCHANGE_SEEK_RATE 200.0f     // mm/min
+//#define DEFAULT_TOOLCHANGE_PULLOFF_RATE 200.0f  // mm/min
 
 // By default, Grbl sets all input pins to normal-low operation with their internal pull-up resistors
 // enabled. This simplifies the wiring for users by requiring only a normally closed (NC) switch connected
@@ -522,10 +525,14 @@
 // greater.
 //#define DEFAULT_N_HOMING_LOCATE_CYCLE 1 // Integer (1-127)
 
-// If homing is enabled, homing init lock sets Grbl into an alarm state upon power up. This forces
-// the user to perform the homing cycle (or override the locks) before doing anything else. This is
+// If homing is enabled, homing init lock sets Grbl into an alarm state upon power up or a soft reset.
+// This forces the user to perform the homing cycle before doing anything else. This is
 // mainly a safety feature to remind the user to home, since position is unknown to Grbl.
 #define DEFAULT_HOMING_INIT_LOCK // Default disabled. Uncomment to enable.
+
+// If homing init lock is enabled this sets Grbl into an alarm state upon power up or a soft reset.
+// To allow a soft reset to override the lock uncomment the line below.
+//#define DEFAULT_HOMING_OVERRIDE_LOCKS // Default disabled. Uncomment to enable.
 
 // Define the homing cycle patterns with bitmasks. The homing cycle first performs a search mode
 // to quickly engage the limit switches, followed by a slower locate mode, and finished by a short

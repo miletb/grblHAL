@@ -77,6 +77,9 @@
 #ifndef CNC_BOOSTERPACK_A4998
 #define CNC_BOOSTERPACK_A4998   0
 #endif
+#ifndef LIMITS_OVERRIDE_ENABLE
+#define LIMITS_OVERRIDE_ENABLE  0
+#endif
 
 #define CNC_BOOSTERPACK         0
 
@@ -121,7 +124,7 @@
 #include "spindle/huanyang.h"
 #endif
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
 #include "tmc2130/trinamic.h"
 #endif
 
@@ -129,7 +132,7 @@
 #include "plasma/thc.h"
 #endif
 
-#if (TRINAMIC_ENABLE && TRINAMIC_I2C) || ATC_ENABLE || EEPROM_ENABLE
+#if (TRINAMIC_ENABLE == 2130 && TRINAMIC_I2C) || ATC_ENABLE || EEPROM_ENABLE
 #define USE_I2C
 #endif
 

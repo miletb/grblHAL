@@ -2,7 +2,7 @@
 
   driver.c - driver code for Atmel SAM3X8E ARM processor
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2019-2020 Terje Io
 
@@ -110,12 +110,13 @@ typedef struct {
 
 static bool IOInitDone = false;
 static uint32_t pulse_length, pulse_delay;
-// Inverts the probe pin state depending on user settings and probing cycle mode.
-static bool probe_invert;
 static axes_signals_t next_step_outbits;
 static delay_t delay_ms = { .ms = 1, .callback = NULL }; // NOTE: initial ms set to 1 for "resetting" systick timer on startup
 static debounce_queue_t debounce_queue = {0};
 static input_signal_t a_signals[10] = {0}, b_signals[10] = {0}, c_signals[10] = {0}, d_signals[10] = {0};
+static probe_state_t probe = {
+    .connected = On
+};
 #ifdef SQUARING_ENABLED
 static axes_signals_t motors_1 = {AXES_BITMASK}, motors_2 = {AXES_BITMASK};
 #endif
@@ -324,7 +325,7 @@ inline static __attribute__((always_inline)) void set_dir_outputs (axes_signals_
 static void stepperEnable (axes_signals_t enable)
 {
     enable.value ^= settings.steppers.enable_invert.mask;
-#if TRINAMIC_ENABLE && TRINAMIC_I2C
+#if TRINAMIC_ENABLE == 2130 && TRINAMIC_I2C
     trinamic_stepper_enable(enable);
 #else
     BITBAND_PERI(X_DISABLE_PORT->PIO_ODSR, X_DISABLE_PIN) = enable.x;
@@ -602,10 +603,10 @@ static void limitsEnable (bool on, bool homing)
     } while(i);
 
   #ifdef SQUARING_ENABLED
-    hal.limits.get_state = homing ? limitsGetHomeState : limitsGetState;
+    hal.homing.get_state = homing ? limitsGetHomeState : limitsGetState;
   #endif
 
-  #if TRINAMIC_ENABLE
+  #if TRINAMIC_ENABLE == 2130
     trinamic_homing(homing);
   #endif
 }
@@ -637,31 +638,31 @@ static control_signals_t systemGetState (void)
     return signals;
 }
 
+#ifdef PROBE_PIN
+
 // Sets up the probe pin invert mask to
 // appropriately set the pin logic according to setting for normal-high/normal-low operation
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
 static void probeConfigure (bool is_probe_away, bool probing)
 {
-  probe_invert = settings.probe.invert_probe_pin;
-
-  if (is_probe_away)
-      probe_invert = !probe_invert;
+    probe.triggered = Off;
+    probe.is_probing = probing;
+    probe.inverted = is_probe_away ? !settings.probe.invert_probe_pin : settings.probe.invert_probe_pin;
 }
+
 
 // Returns the probe connected and triggered pin states.
 probe_state_t probeGetState (void)
 {
-    probe_state_t state = {
-        .connected = On
-    };
+    probe_state_t state = {0};
 
-#ifdef PROBE_PIN
-    state.triggered = BITBAND_PERI(PROBE_PORT->PIO_PDSR, PROBE_PIN) ^ probe_invert;
-#else
-    state.triggered = false;
-#endif
+    state.connected = probe.connected;
+    state.triggered = BITBAND_PERI(PROBE_PORT->PIO_PDSR, PROBE_PIN) ^ probe.inverted;
+
     return state;
 }
+
+#endif
 
 #ifndef VFD_SPINDLE
 
@@ -899,10 +900,6 @@ static void PIO_InputMode (Pio *port, uint32_t bit, bool no_pullup, gpio_intr_t 
 void settings_changed (settings_t *settings)
 {
     if(IOInitDone) {
-
-      #if TRINAMIC_ENABLE
-        trinamic_configure();
-      #endif
 
         stepperEnable(settings->steppers.deenergize);
 
@@ -1333,16 +1330,15 @@ static bool driver_setup (settings_t *settings)
     PIO_Mode(PROBE_PORT, PROBE_BIT, INPUT);
   #endif
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
     trinamic_start(true);
 #endif
 
  // Set defaults
 
-    IOInitDone = settings->version == 18;
+    IOInitDone = settings->version == 19;
 
-    settings_changed(settings);
-
+    hal.settings_changed(settings);
     hal.stepper.go_idle(true);
     hal.spindle.set_state((spindle_state_t){0}, 0.0f);
     hal.coolant.set_state((coolant_state_t){0});
@@ -1467,7 +1463,7 @@ bool driver_init (void)
     NVIC_EnableIRQ(SysTick_IRQn);
 
     hal.info = "SAM3X8E";
-	hal.driver_version = "201014";
+	hal.driver_version = "201223";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
 #endif
@@ -1489,13 +1485,15 @@ bool driver_init (void)
 
     hal.limits.enable = limitsEnable;
     hal.limits.get_state = limitsGetState;
+    hal.homing.get_state = limitsGetState;
 
     hal.coolant.set_state = coolantSetState;
     hal.coolant.get_state = coolantGetState;
-//#ifdef PROBE_PIN
+
+#ifdef PROBE_PIN
     hal.probe.configure = probeConfigure;
     hal.probe.get_state = probeGetState;
-//#endif
+#endif
 
 #ifndef VFD_SPINDLE
     hal.spindle.set_state = spindleSetState;
@@ -1530,7 +1528,7 @@ bool driver_init (void)
     hal.stream.suspend_read = serialSuspendInput;
 #endif
 
-#if EEPROM_ENABLE || KEYPAD_ENABLE || (TRINAMIC_ENABLE && TRINAMIC_I2C)
+#if EEPROM_ENABLE || KEYPAD_ENABLE || (TRINAMIC_ENABLE == 2130 && TRINAMIC_I2C)
     i2c_init();
 #endif
 
@@ -1578,7 +1576,7 @@ bool driver_init (void)
     hal.driver_cap.limits_pull_up = On;
     hal.driver_cap.probe_pull_up = On;
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
     trinamic_init();
 #endif
 

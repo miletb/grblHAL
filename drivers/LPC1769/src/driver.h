@@ -2,7 +2,7 @@
 
   driver.h - driver code for NXP LPC176x ARM processors
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2018-2020 Terje Io
 
@@ -31,6 +31,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "grbl/hal.h"
+#include "grbl/nuts_bolts.h"
+
 #ifndef OVERRIDE_MY_MACHINE
 #include "my_machine.h"
 #endif
@@ -52,6 +55,9 @@
 #ifndef EEPROM_IS_FRAM
 #define EEPROM_IS_FRAM      0
 #endif
+#ifndef LIMIT_MAX_ENABLE
+#define LIMIT_MAX_ENABLE    0
+#endif
 
 // Define GPIO output mode options
 
@@ -72,6 +78,12 @@
     #include "smoothieboard_map.h"
 #elif defined(BOARD_RAMPS_16)
     #include "ramps_1.6_map.h"
+#elif defined(BOARD_BTT_SKR_13)
+    #include "btt_skr_1.3_map.h"
+#elif defined(BOARD_BTT_SKR_14_TURBO)
+    #include "btt_skr_1.4_turbo_map.h"
+#elif defined(BOARD_MKS_SBASE_13)
+#include "mks_sbase_map.h"
 #else
     #include "generic_map.h"
 #endif
@@ -91,6 +103,12 @@
 #define FLASH_ENABLE 0
 #endif
 
+#if EEPROM_ENABLE
+#define I2C_ENABLE 1
+#elif !defined(I2C_ENABLE)
+#define I2C_ENABLE 0
+#endif
+
 #ifndef X_STEP_PORT
 #define X_STEP_PORT STEP_PORT
 #endif
@@ -99,6 +117,12 @@
 #endif
 #ifndef Z_STEP_PORT
 #define Z_STEP_PORT STEP_PORT
+#endif
+#if defined(A_AXIS) && !defined(A_STEP_PORT)
+#define A_STEP_PORT STEP_PORT
+#endif
+#if defined(B_AXIS) && !defined(B_STEP_PORT)
+#define B_STEP_PORT STEP_PORT
 #endif
 
 #ifndef X_DIRECTION_PORT
@@ -109,6 +133,28 @@
 #endif
 #ifndef Z_DIRECTION_PORT
 #define Z_DIRECTION_PORT DIRECTION_PORT
+#endif
+#if defined(A_AXIS) && !defined(A_DIRECTION_PORT)
+#define A_DIRECTION_PORT DIRECTION_PORT
+#endif
+#if defined(B_AXIS) && !defined(B_DIRECTION_PORT)
+#define B_DIRECTION_PORT DIRECTION_PORT
+#endif
+
+#ifndef X_DISABLE_PORT
+#define X_DISABLE_PORT DISABLE_PORT
+#endif
+#ifndef Y_DISABLE_PORT
+#define Y_DISABLE_PORT DISABLE_PORT
+#endif
+#ifndef Z_DISABLE_PORT
+#define Z_DISABLE_PORT DISABLE_PORT
+#endif
+#if defined(A_AXIS) && !defined(A_DISABLE_PORT)
+#define A_DISABLE_PORT DISABLE_PORT
+#endif
+#if defined(B_AXIS) && !defined(B_DISABLE_PORT)
+#define B_DISABLE_PORT DISABLE_PORT
 #endif
 
 #ifndef X_LIMIT_PORT

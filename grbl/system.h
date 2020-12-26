@@ -1,7 +1,7 @@
 /*
   system.h - Header for system level commands and real-time processes
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2017-2020 Terje Io
   Copyright (c) 2014-2016 Sungeun K. Jeon for Gnea Research LLC
@@ -25,6 +25,7 @@
 
 #include "gcode.h"
 #include "probe.h"
+#include "alarms.h"
 
 // Define system executor bit map. Used internally by realtime protocol as realtime command flags,
 // which notifies the main program to execute the specified realtime command asynchronously.
@@ -83,26 +84,6 @@ typedef enum {
     Message_NextMessage // Next unassigned message number
 } message_code_t;
 
-// Alarm executor codes. Valid values (1-255). Zero is reserved.
-typedef enum {
-    Alarm_None = 0,
-    Alarm_HardLimit = 1,
-    Alarm_SoftLimit = 2,
-    Alarm_AbortCycle = 3,
-    Alarm_ProbeFailInitial = 4,
-    Alarm_ProbeFailContact = 5,
-    Alarm_HomingFailReset = 6,
-    Alarm_HomingFailDoor = 7,
-    Alarm_FailPulloff = 8,
-    Alarm_HomingFailApproach = 9,
-    Alarm_EStop = 10,
-    Alarm_HomingRequried = 11,
-    Alarm_LimitsEngaged = 12,
-    Alarm_ProbeProtect = 13,
-    Alarm_Spindle = 14,
-    Alarm_HomingFailAutoSquaringApproach = 15
-} alarm_code_t;
-
 typedef enum {
     Parking_DoorClosed = 0,
     Parking_DoorAjar,
@@ -116,6 +97,8 @@ typedef enum {
     Hold_Complete = 1,
     Hold_Pending = 2
 } hold_state_t;
+
+typedef uint_fast16_t sys_state_t;
 
 // Define step segment generator state flags.
 typedef union {
@@ -144,7 +127,8 @@ typedef union {
                  probe_disconnected :1,
                  motor_fault        :1,
                  motor_warning      :1,
-                 unassigned         :4,
+                 limits_override    :1,
+                 unassigned         :3,
                  probe_triggered    :1, // used for probe protection
                  deasserted         :1; // this flag is set if signals are deasserted. Note: do NOT pass on to Grbl control_interrupt_handler if set.
     };
@@ -221,8 +205,6 @@ typedef union {
 
 // Define global system variables
 typedef struct {
-    uint_fast16_t state;                // Tracks the current system state of Grbl.
-                                        // NOTE: Setting the state variable directly is NOT allowed! Use the set_state() function!
     bool abort;                         // System abort flag. Forces exit back to main loop for reset.
     bool cancel;                        // System cancel flag.
     bool suspend;                       // System suspend state flag.
@@ -245,6 +227,12 @@ typedef struct {
 #ifdef PID_LOG
     pid_data_t pid_log;
 #endif
+    // The following variables are not cleared upon soft reset, do NOT move. state must be first!
+    uint_fast16_t state;                // Tracks the current system state of Grbl.
+                                        // NOTE: Setting the state variable directly is NOT allowed! Use the set_state() function!
+    alarm_code_t alarm;                 // Current alarm, only valid if sys.state STATE_ALARM flag set.
+    bool cold_start;                    // Set to true on boot, is false on subsequent soft resets.
+    bool driver_started;                // Set to true when driver initialization is completed.
 } system_t;
 
 extern system_t sys;
@@ -258,24 +246,27 @@ extern volatile uint_fast16_t sys_rt_exec_state;   // Global realtime executor b
 extern volatile uint_fast16_t sys_rt_exec_alarm;   // Global realtimeate val executor bitflag variable for setting various alarms.
 
 // Executes an internal system command, defined as a string starting with a '$'
-status_code_t system_execute_line(char *line);
+status_code_t system_execute_line (char *line);
 
 // Execute the startup script lines stored in non-volatile storage upon initialization
-void system_execute_startup(char *line);
+void system_execute_startup (char *line);
 
-void system_flag_wco_change();
+void system_flag_wco_change (void);
 
 // Returns machine position of axis 'idx'. Must be sent a 'step' array.
 //float system_convert_axis_steps_to_mpos(int32_t *steps, uint_fast8_t idx);
 
 // Updates a machine 'position' array based on the 'step' array sent.
-void system_convert_array_steps_to_mpos(float *position, int32_t *steps);
+void system_convert_array_steps_to_mpos (float *position, int32_t *steps);
 
 // Checks and reports if target array exceeds machine travel limits.
-bool system_check_travel_limits(float *target);
+bool system_check_travel_limits (float *target);
 
 // Checks and limit jog commands to within machine travel limits.
 void system_apply_jog_limits (float *target);
+
+// Raise and report alarm state
+void system_raise_alarm (alarm_code_t alarm);
 
 // Special handlers for setting and clearing Grbl's real-time execution flags.
 #define system_set_exec_state_flag(mask) hal.set_bits_atomic(&sys_rt_exec_state, (mask))

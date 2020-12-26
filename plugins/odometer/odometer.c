@@ -57,6 +57,7 @@ static on_state_change_ptr on_state_change;
 static spindle_set_state_ptr spindle_set_state_;
 static settings_changed_ptr settings_changed;
 static on_report_options_ptr on_report_options;
+static on_report_command_help_ptr on_report_command_help;
 
 static void stepperPulseStart (stepper_t *stepper)
 {
@@ -214,10 +215,24 @@ static status_code_t commandExecute (uint_fast16_t state, char *line, char *lcli
     return retval == Status_Unhandled && on_unknown_sys_command ? on_unknown_sys_command(state, line, lcline) : retval;
 }
 
-static void onReportOptions (void)
+static void onReportCommandHelp (void)
 {
-    on_report_options();
-    hal.stream.write("[PLUGIN:ODOMETERS v0.02]"  ASCII_EOL);
+    hal.stream.write("$ODOMETERS - list odometer log" ASCII_EOL);
+    hal.stream.write("$ODOMETERS=PREV - list previous odometer log when available" ASCII_EOL);
+    hal.stream.write("$ODOMETERS=RST - copy current log to previous and clear current" ASCII_EOL);
+
+    if(on_report_command_help)
+        on_report_command_help();
+}
+
+static void onReportOptions (bool newopt)
+{
+    on_report_options(newopt);
+
+    if(newopt)
+        hal.stream.write(",ODO");
+    else
+        hal.stream.write("[PLUGIN:ODOMETERS v0.02]" ASCII_EOL);
 }
 
 static void odometer_warning1 (uint_fast16_t state)
@@ -246,6 +261,8 @@ void odometer_init()
         if(nvs.memcpy_from_nvs((uint8_t *)&odometers, odometers_address, sizeof(odometer_data_t), true) != NVS_TransferResult_OK)
             odometer_data_reset(false);
 
+        hal.driver_cap.odometers = On;
+
         on_unknown_sys_command = grbl.on_unknown_sys_command;
         grbl.on_unknown_sys_command = commandExecute;
 
@@ -254,6 +271,9 @@ void odometer_init()
 
         on_report_options = grbl.on_report_options;
         grbl.on_report_options = onReportOptions;
+
+        on_report_command_help = grbl.on_report_command_help;
+        grbl.on_report_command_help = onReportCommandHelp;
 
         settings_changed = hal.settings_changed;
         hal.settings_changed = onSettingsChanged;

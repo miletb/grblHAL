@@ -1,7 +1,7 @@
 /*
   report.h - reporting and messaging methods
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2018-2019 Terje Io
   Copyright (c) 2012-2016 Sungeun K. Jeon for Gnea Research LLC
@@ -52,6 +52,7 @@ message_code_t report_feedback_message (message_code_t message_code);
 void report_init_message (void);
 
 // Prints Grbl help.
+status_code_t report_help (char *args, char *lcargs);
 void report_grbl_help();
 
 // Prints Grbl setting(s)
@@ -83,7 +84,12 @@ void report_startup_line (uint8_t n, char *line);
 void report_execute_startup_message (char *line, status_code_t status_code);
 
 // Prints build info and user info.
-void report_build_info (char *line);
+void report_build_info (char *line, bool extended);
+
+status_code_t report_alarm_details (void);
+status_code_t report_error_details (void);
+status_code_t report_setting_group_details (bool by_id, char *prefix);
+status_code_t report_settings_details (bool human_readable, setting_type_t setting, setting_group_t group);
 
 // Prints current PID log.
 void report_pid_log (void);

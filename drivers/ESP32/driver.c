@@ -3,7 +3,7 @@
 
   Driver code for ESP32
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2018-2020 Terje Io
 
@@ -86,6 +86,10 @@ static bool pwmEnabled = false;
 static spindle_pwm_t spindle_pwm;
 #else
 #undef SPINDLE_RPM_CONTROLLED
+#endif
+
+#ifndef SPINDLE_MASK
+#define SPINDLE_MASK 0
 #endif
 
 #include "freertos/FreeRTOS.h"
@@ -252,7 +256,9 @@ state_signal_t inputpin[] = {
 #ifdef SAFETY_DOOR_PIN
     { .id = Input_SafetyDoor,   .pin = SAFETY_DOOR_PIN, .group = INPUT_GROUP_CONTROL },
 #endif
+#ifdef PROBE_PIN
     { .id = Input_Probe,        .pin = PROBE_PIN,       .group = INPUT_GROUP_PROBE },
+#endif
     { .id = Input_LimitX,       .pin = X_LIMIT_PIN,     .group = INPUT_GROUP_LIMIT },
     { .id = Input_LimitY,       .pin = Y_LIMIT_PIN,     .group = INPUT_GROUP_LIMIT },
     { .id = Input_LimitZ,       .pin = Z_LIMIT_PIN,     .group = INPUT_GROUP_LIMIT }
@@ -276,8 +282,9 @@ state_signal_t inputpin[] = {
 static volatile uint32_t ms_count = 1; // NOTE: initial value 1 is for "resetting" systick timer
 static bool IOInitDone = false;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-// Inverts the probe pin state depending on user settings and probing cycle mode.
-static uint8_t probe_invert;
+static probe_state_t probe = {
+    .connected = On
+};
 
 #ifdef USE_I2S_OUT
 #define DIGITAL_IN(pin) i2s_out_state(pin)
@@ -316,11 +323,7 @@ static ledc_channel_config_t ledConfig = {
 #endif
 
 #if MODBUS_ENABLE
-#ifndef MODBUS_BAUD
-#define MODBUS_BAUD 19200
-#endif
 static modbus_stream_t modbus_stream = {0};
-static TimerHandle_t xModBusTimer = NULL;
 #endif
 
 // Interrupt handler prototypes
@@ -498,7 +501,7 @@ static void stepperEnable (axes_signals_t enable)
 {
     enable.mask ^= settings.steppers.enable_invert.mask;
 
-#if TRINAMIC_ENABLE && TRINAMIC_I2C
+#if TRINAMIC_ENABLE == 2130 && TRINAMIC_I2C
     axes_signals_t tmc_enable = trinamic_stepper_enable(enable);
  #if !CNC_BOOSTERPACK // Trinamic BoosterPack does not support mixed drivers
   #if IOEXPAND_ENABLE
@@ -711,7 +714,7 @@ static void limitsEnable (bool on, bool homing)
             gpio_set_intr_type(inputpin[i].pin, on ? (inputpin[i].invert ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE) : GPIO_INTR_DISABLE);
     } while(i);
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
     trinamic_homing(homing);
 #endif
 }
@@ -768,6 +771,8 @@ inline IRAM_ATTR static control_signals_t systemGetState (void)
     return signals;
 }
 
+#ifdef PROBE_PIN
+
 // Sets up the probe pin invert mask to
 // appropriately set the pin logic according to setting for normal-high/normal-low operation
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
@@ -777,10 +782,10 @@ static void probeConfigure(bool is_probe_away, bool probing)
     i2s_set_streaming_mode(!probing);
 #endif
 
-    probe_invert = settings.probe.invert_probe_pin ? 0 : 1;
+    probe.triggered = Off;
+    probe.is_probing = probing;
+    probe.inverted = is_probe_away ? !settings.probe.invert_probe_pin : settings.probe.invert_probe_pin;
 
-    if(is_probe_away)
-        probe_invert ^= 1;
 #if PROBE_ISR
     gpio_set_intr_type(inputpin[INPUT_PROBE].pin, probe_invert ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE);
     inputpin[INPUT_PROBE].active = false;
@@ -790,20 +795,22 @@ static void probeConfigure(bool is_probe_away, bool probing)
 // Returns the probe connected and triggered pin states.
 probe_state_t probeGetState (void)
 {
-    probe_state_t state = {
-        .connected = On
-    };
+    probe_state_t state = {0};
+
+    state.connected = probe.connected;
 
 #if PROBE_ISR
     // TODO: verify!
-    inputpin[INPUT_PROBE].active = inputpin[INPUT_PROBE].active || ((uint8_t)gpio_get_level(PROBE_PIN) ^ probe_invert);
+    inputpin[INPUT_PROBE].active = inputpin[INPUT_PROBE].active || ((uint8_t)gpio_get_level(PROBE_PIN) ^ probe.inverted);
     state.triggered = inputpin[INPUT_PROBE].active;
 #else
-    state.triggered = (uint8_t)gpio_get_level(PROBE_PIN) ^ probe_invert;
+    state.triggered = (uint8_t)gpio_get_level(PROBE_PIN) ^ probe.inverted;
 #endif
 
     return state;
 }
+
+#endif
 
 #ifndef VFD_SPINDLE
 
@@ -1124,10 +1131,6 @@ static void settings_changed (settings_t *settings)
 
     if(IOInitDone) {
 
-      #if TRINAMIC_ENABLE
-        trinamic_configure();
-      #endif
-
       #ifndef VFD_SPINDLE
         hal.spindle.set_state = hal.driver_cap.variable_spindle ? spindleSetStateVariable : spindleSetState;
       #endif
@@ -1208,12 +1211,12 @@ static void settings_changed (settings_t *settings)
                     inputpin[i].invert = control_fei.safety_door_ajar;
                     config.intr_type = inputpin[i].invert ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE;
                     break;
-
+#ifdef PROBE_PIN
                 case Input_Probe:
                     pullup = hal.driver_cap.probe_pull_up;
                     inputpin[i].invert = false;
                     break;
-
+#endif
                 case Input_LimitX:
                     pullup = !settings->limits.disable_pullup.x;
                     inputpin[i].invert = limit_fei.x;
@@ -1309,7 +1312,7 @@ static void reportConnection (void)
 // Initializes MCU peripherals for Grbl use
 static bool driver_setup (settings_t *settings)
 {
-#if TRINAMIC_ENABLE && CNC_BOOSTERPACK // Trinamic BoosterPack does not support mixed drivers
+#if TRINAMIC_ENABLE == 2130 && BOARD_BDRING_V3P5 // Trinamic BoosterPack does not support mixed drivers
     driver_settings.trinamic.driver_enable.mask = AXES_BITMASK;
 #endif
 
@@ -1429,7 +1432,7 @@ static bool driver_setup (settings_t *settings)
     ioexpand_init();
 #endif
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
   #if CNC_BOOSTERPACK // Trinamic BoosterPack does not support mixed drivers
     trinamic_start(false);
   #else
@@ -1443,21 +1446,13 @@ static bool driver_setup (settings_t *settings)
 
   // Set defaults
 
-    IOInitDone = settings->version == 18;
+    IOInitDone = settings->version == 19;
 
-    settings_changed(settings);
-
+    hal.settings_changed(settings);
     hal.stepper.go_idle(true);
 
     return IOInitDone;
 }
-
-#if MODBUS_ENABLE
-static void vModBusPollCallback (TimerHandle_t xTimer)
-{
-    modbus_poll();
-}
-#endif
 
 // Initialize HAL pointers, setup serial comms and enable EEPROM
 // NOTE: Grbl is not yet configured (from EEPROM data), driver_setup() will be called when done
@@ -1472,7 +1467,7 @@ bool driver_init (void)
 #endif
 
     hal.info = "ESP32";
-    hal.driver_version = "201014";
+    hal.driver_version = "201218";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
 #endif
@@ -1578,21 +1573,22 @@ bool driver_init (void)
 #endif
 
 #if MODBUS_ENABLE
-    serial2Init(MODBUS_BAUD);
-    modbus_stream.rx_timeout = 50;
+
     modbus_stream.write = serial2Write;
     modbus_stream.read = serial2Read;
     modbus_stream.flush_rx_buffer = serial2Flush;
     modbus_stream.flush_tx_buffer = serial2Flush;
     modbus_stream.get_rx_buffer_count = serial2Available;
     modbus_stream.get_tx_buffer_count = serial2txCount;
-  #ifdef MODBUS_DIRECTION_PIN
-    modbus_stream.set_direction = serial2Direction;
-  #endif
-    modbus_init(&modbus_stream);
+    modbus_stream.set_baud_rate = serial2SetBaudRate;
 
-    if((xModBusTimer = xTimerCreate("ModBusPoll", pdMS_TO_TICKS(10), pdTRUE, NULL, vModBusPollCallback)))
-        xTimerStart(xModBusTimer, 0);
+    bool modbus = modbus_init(&modbus_stream);
+
+#if SPINDLE_HUANYANG > 0
+    if(modbus)
+        huanyang_init(&modbus_stream);
+#endif
+
 #endif
 
 #if WIFI_ENABLE
@@ -1603,7 +1599,7 @@ bool driver_init (void)
     bluetooth_init();
 #endif
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
     trinamic_init();
 #endif
 
@@ -1611,9 +1607,6 @@ bool driver_init (void)
     keypad_init();
 #endif
 
-#ifdef SPINDLE_HUANYANG
-    huanyang_init(&modbus_stream);
-#endif
 
     my_plugin_init();
 

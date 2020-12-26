@@ -3,7 +3,7 @@
 
   Driver code for Texas Instruments Tiva C (TM4C123GH6PM) ARM processor
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2016-2020 Terje Io
 
@@ -94,14 +94,14 @@ static void stepperPulseStartSyncronized (stepper_t *stepper);
 
 #endif
 
-static bool pwmEnabled = false, IOInitDone = false, probeState = false;
+static bool pwmEnabled = false, IOInitDone = false;
 static uint32_t pulse_length, pulse_delay;
 static axes_signals_t next_step_outbits;
 static spindle_pwm_t spindle_pwm;
 static delay_t delay = { .ms = 1, .callback = NULL }; // NOTE: initial ms set to 1 for "resetting" systick timer on startup
-
-// Inverts the probe pin state depending on user settings and probing cycle mode.
-static uint8_t probe_invert;
+static probe_state_t probe = {
+    .connected = On
+};
 
 #if STEP_OUTMODE == GPIO_MAP
 
@@ -420,26 +420,25 @@ inline static control_signals_t systemGetState (void)
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
 static void probeConfigure (bool is_probe_away, bool probing)
 {
-  probe_invert = settings.probe.invert_probe_pin ? 0 : PROBE_PIN;
+    probe.triggered = Off;
+    probe.is_probing = probing;
+    probe.inverted = is_probe_away ? !settings.probe.invert_probe_pin : settings.probe.invert_probe_pin;
+/*
+    GPIOIntDisable(PROBE_PORT, PROBE_PIN);
+    GPIOIntTypeSet(PROBE_PORT, PROBE_PIN, probe_invert ? GPIO_FALLING_EDGE : GPIO_RISING_EDGE);
+    GPIOIntEnable(PROBE_PORT, PROBE_PIN);
 
-  if (is_probe_away)
-      probe_invert ^= PROBE_PIN;
-
-  GPIOIntTypeSet(PROBE_PORT, PROBE_PIN, probe_invert ? GPIO_FALLING_EDGE : GPIO_RISING_EDGE);
-  GPIOIntEnable(PROBE_PORT, PROBE_PIN);
-
-  probeState = (uint8_t)(GPIOPinRead(PROBE_PORT, PROBE_PIN)) ^ probe_invert != 0;
+    probe.triggered = !!GPIOPinRead(PROBE_PORT, PROBE_PIN)) ^ probe.inverted;
+*/
 }
 
 // Returns the probe connected and triggered pin states.
 probe_state_t probeGetState (void)
 {
-    probe_state_t state = {
-        .connected = On
-    };
-
-    //state.triggered = probeState; // TODO: check out using interrupt instead (we want to trap trigger and not risk losing it due to bouncing)
-    state.triggered = (((uint8_t)GPIOPinRead(PROBE_PORT, PROBE_PIN)) ^ probe_invert) != 0;
+    probe_state_t state = {0};
+    state.connected = probe.connected;
+    //state.triggered = probe.triggered; // TODO: check out using interrupt instead (we want to trap trigger and not risk losing it due to bouncing)
+    state.triggered = !!GPIOPinRead(PROBE_PORT, PROBE_PIN) ^ probe.inverted;
 
     return state;
 }
@@ -1001,10 +1000,9 @@ static bool driver_setup (settings_t *settings)
 
   // Set defaults
 
-    IOInitDone = settings->version == 18;
+    IOInitDone = settings->version == 19;
 
-    settings_changed(settings);
-
+    hal.settings_changed(settings);
     hal.stepper.go_idle(true);
     hal.spindle.set_state((spindle_state_t){0}, 0.0f);
     hal.coolant.set_state((coolant_state_t){0});
@@ -1042,7 +1040,7 @@ bool driver_init (void)
 #endif
 
     hal.info = "TM4C123HP6PM";
-    hal.driver_version = "201014";
+    hal.driver_version = "201218";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
 #endif
@@ -1224,7 +1222,7 @@ static void limit_isr (void)
     if(iflags & HWLIMIT_MASK)
         hal.limits.interrupt_callback(limitsGetState());
     else if(iflags & PROBE_PIN)
-        probeState = probe_invert != 0;
+        probe.triggered = probe.inverted;
 }
 
 static void limit_isr_debounced (void)
@@ -1237,7 +1235,7 @@ static void limit_isr_debounced (void)
         TimerLoadSet(DEBOUNCE_TIMER_BASE, TIMER_A, 32000);  // 32ms
         TimerEnable(DEBOUNCE_TIMER_BASE, TIMER_A);
     } else if(iflags & PROBE_PIN)
-        probeState = probe_invert != 0;
+        probe.triggered = probe.inverted;
 }
 
 static void control_isr (void)

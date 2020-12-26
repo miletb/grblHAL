@@ -19,6 +19,10 @@
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#if TRINAMIC_ENABLE
+#error Trinamic plugin not supported!
+#endif
+
 // Define step pulse output pins.
 #define STEP_PORT       GPIOA
 #define X_STEP_PIN      0
@@ -125,4 +129,5 @@
 #define SD_CS_PORT  GPIOA
 #define SD_CS_PIN   3
 #define SD_CS_BIT   (1<<SD_CS_PIN)
+#define SPI_PORT    1 // GPIOA, SCK_PIN = 5, MISO_PIN = 6, MOSI_PIN = 7
 #endif

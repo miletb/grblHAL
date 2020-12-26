@@ -91,15 +91,14 @@
 // Define probe switch input pin.
 #if PROBE_ENABLE
 #define PROBE_PIN       GPIO_NUM_32
-#else
-#define PROBE_PIN       0xFF
 #endif
 
 #if MODBUS_ENABLE
 #define UART2_RX_PIN            GPIO_NUM_22
 #define UART2_TX_PIN            GPIO_NUM_21
+#if RS485_DIR_ENABLE
 #define MODBUS_DIRECTION_PIN    GPIO_NUM_2
-#define MODBUS_BAUD             19200
+#endif
 #endif
 
 

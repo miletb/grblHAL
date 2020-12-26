@@ -2,7 +2,7 @@
 
   driver.c - driver code for Atmel SAMD21 ARM processor
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2018-2020 Terje Io
 
@@ -69,11 +69,13 @@ uint32_t vectorTable[sizeof(DeviceVectors) / sizeof(uint32_t)] __attribute__(( a
 //static uint32_t lim_IRQMask = 0;
 static uint16_t pulse_length, pulse_delay;
 static bool pwmEnabled = false, IOInitDone = false;
-// Inverts the probe pin state depending on user settings and probing cycle mode.
-static bool probe_invert, sd_detect = false;
+static bool sd_detect = false;
 static axes_signals_t next_step_outbits;
 static spindle_pwm_t spindle_pwm;
 static delay_t delay_ms = { .ms = 1, .callback = NULL }; // NOTE: initial ms set to 1 for "resetting" systick timer on startup
+static probe_state_t probe = {
+    .connected = On
+};
 
 static axes_signals_t limit_ies; // declare here for now...
 
@@ -138,7 +140,7 @@ static inline __attribute__((always_inline)) void set_dir_outputs (axes_signals_
 static void stepperEnable (axes_signals_t enable)
 {
     enable.value ^= settings.steppers.enable_invert.mask;
-#if TRINAMIC_ENABLE && TRINAMIC_I2C
+#if TRINAMIC_ENABLE == 2130 && TRINAMIC_I2C
     trinamic_stepper_enable(enable);
 #elif IOEXPAND_ENABLE // TODO: read from expander?
     iopins.stepper_enable_xy = enable.x;
@@ -252,7 +254,7 @@ static void limitsEnable (bool on, bool homing)
     else?
         EIC->INTENCLR.reg = lim_IRQMask;
 */
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
     trinamic_homing(homing);
 #endif
 }
@@ -294,32 +296,34 @@ static control_signals_t systemGetState (void)
     return signals;
 }
 
+#ifdef PROBE_PIN
+
 // Sets up the probe pin invert mask to
 // appropriately set the pin logic according to setting for normal-high/normal-low operation
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
 static void probeConfigure (bool is_probe_away, bool probing)
 {
-  probe_invert = settings.probe.invert_probe_pin;
-
-  if (is_probe_away)
-      probe_invert = !probe_invert;
+    probe.triggered = Off;
+    probe.is_probing = probing;
+    probe.inverted = is_probe_away ? !settings.probe.invert_probe_pin : settings.probe.invert_probe_pin;
 }
 
 // Returns the probe connected and triggered pin states.
 probe_state_t probeGetState (void)
 {
-    probe_state_t state = {
-        .connected = On
-    };
+    probe_state_t state = {0};
 
+    state.connected = probe.connected;
 #ifdef PROBE_PIN
-    state.triggered = pinIn(PROBE_PIN) ^ probe_invert;
+    state.triggered = !!pinIn(PROBE_PIN) ^ probe.inverted;
 #else
     state.triggered = false;
 #endif
 
     return state;
 }
+
+#endif
 
 // Static spindle (off, on cw & on ccw)
 
@@ -556,10 +560,6 @@ void settings_changed (settings_t *settings)
     }
 
     if(IOInitDone) {
-
-      #if TRINAMIC_ENABLE
-        trinamic_configure();
-      #endif
 
         stepperEnable(settings->steppers.deenergize);
 
@@ -820,7 +820,7 @@ static bool driver_setup (settings_t *settings)
     ioexpand_init();
 #endif
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
   #if CNC_BOOSTERPACK // Trinamic BoosterPack does not support mixed drivers
     trinamic_start(false);
   #else
@@ -834,9 +834,9 @@ static bool driver_setup (settings_t *settings)
 
  // Set defaults
 
-    IOInitDone = settings->version == 18;
+    IOInitDone = settings->version == 19;
 
-    settings_changed(settings);
+    hal.settings_changed(settings);
 
     hal.stepper.go_idle(true);
     hal.spindle.set_state((spindle_state_t){0}, 0.0f);
@@ -966,7 +966,7 @@ bool driver_init (void) {
     IRQRegister(SysTick_IRQn, SysTick_IRQHandler);
 
     hal.info = "SAMD21";
-    hal.driver_version = "201014";
+    hal.driver_version = "201223";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
 #endif
@@ -987,10 +987,11 @@ bool driver_init (void) {
 
     hal.coolant.set_state = coolantSetState;
     hal.coolant.get_state = coolantGetState;
-//#ifdef PROBE_PIN
+
+#ifdef PROBE_PIN
     hal.probe.configure = probeConfigure;
     hal.probe.get_state = probeGetState;
-//#endif
+#endif
 
     hal.spindle.set_state = spindleSetState;
     hal.spindle.get_state = spindleGetState;
@@ -1067,7 +1068,7 @@ bool driver_init (void) {
     hal.driver_cap.limits_pull_up = On;
     hal.driver_cap.probe_pull_up = On;
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
     trinamic_init();
 #endif
 

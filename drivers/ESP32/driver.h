@@ -3,7 +3,7 @@
 
   Driver code for ESP32
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2018-2020 Terje Io
   Copyright (c) 2011-2015 Sungeun K. Jeon
@@ -42,19 +42,6 @@
 //
 #else
 //
-// options for cmake (idf.py)
-//
-#ifdef CNC_BOOSTERPACK
-#define BOARD_CNC_BOOSTERPACK  1
-#else
-// NOTE: Only one board may be enabled!
-// If none is enabled pin mappings from generic_map.h will be used
-//#define BOARD_BDRING_V3P5
-//#define BOARD_BDRING_V4
-//#define BOARD_BDRING_I2S6A // NOT production ready!
-#endif
-
-//
 // Set options from CMakeLists.txt
 //
 #ifdef WEBUI_ENABLE
@@ -89,7 +76,7 @@
 
 #ifdef TRINAMIC_ENABLE
 #undef TRINAMIC_ENABLE
-#define TRINAMIC_ENABLE 1
+#define TRINAMIC_ENABLE 2130
 #define TRINAMIC_I2C    1
 #endif
 
@@ -108,7 +95,18 @@
 #define HTTP_ENABLE 1
 #endif
 
+#ifdef RS485_DIR_ENABLE
+#undef RS485_DIR_ENABLE
+#if SPINDLE_HUANYANG
+#define RS485_DIR_ENABLE 1
+#else
+#define RS485_DIR_ENABLE 0
+#endif
+#endif
+
+#ifndef EEPROM_ENABLE
 #define EEPROM_ENABLE 0
+#endif
 
 #endif
 
@@ -221,7 +219,7 @@ static const DRAM_ATTR float FZERO = 0.0f;
 
 // End configuration
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
 #include "tmc2130/trinamic.h"
 #endif
 
@@ -255,6 +253,7 @@ typedef struct {
 #elif defined(BOARD_BDRING_I2S6A)
   #include "bdring_i2s_6_axis_map.h"
 #else // default board - NOTE: NOT FINAL VERSION!
+  #warning "Compiling for generic board!"
   #include "generic_map.h"
 #endif
 
@@ -265,7 +264,7 @@ typedef struct {
 #ifdef I2C_PORT
 extern QueueHandle_t i2cQueue;
 extern SemaphoreHandle_t i2cBusy;
-#elif IOEXPAND_ENABLE || KEYPAD_ENABLE || EEPROM_ENABLE || (TRINAMIC_ENABLE && TRINAMIC_I2C)
+#elif IOEXPAND_ENABLE || KEYPAD_ENABLE || EEPROM_ENABLE || (TRINAMIC_ENABLE == 2130 && TRINAMIC_I2C)
 #error "I2C port not available!"
 #endif
 

@@ -2,7 +2,7 @@
 
   driver.c - driver code for NXP LPC176x ARM processors
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2018-2020 Terje Io
 
@@ -24,9 +24,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "grbl/hal.h"
-#include "grbl/nuts_bolts.h"
-
 #include "driver.h"
 #include "serial.h"
 #include "grbl-lpc/pwm_driver.h"
@@ -41,22 +38,25 @@
 #include "flash.h"
 #endif
 
-#if SDCARD_ENABLE
-#include "sdcard/sdcard.h"
-#endif
-
 #if USB_SERIAL_CDC
 #include "usb_serial.h"
 #endif
 
 #if EEPROM_ENABLE
-#include "eeprom.h"
+#include "eeprom/eeprom.h"
+#endif
+
+#if defined(X_LIMIT_PORT_MAX) || defined(Z_LIMIT_PORT_MAX) || defined(Z_LIMIT_PORT_MAX)
+#define HAS_MAX_LIMIT_INPUTS
 #endif
 
 static bool pwmEnabled = false, IOInitDone = false;
 static uint16_t pulse_length, pulse_delay;
 // Inverts the probe pin state depending on user settings and probing cycle mode.
-static uint8_t probe_invert_mask;
+static probe_state_t probe = {
+    .connected = On
+};
+
 static axes_signals_t next_step_outbits;
 static spindle_pwm_t spindle_pwm;
 static delay_t delay = { .ms = 1, .callback = NULL }; // NOTE: initial ms set to 1 for "resetting" systick timer on startup
@@ -113,8 +113,10 @@ typedef struct {
     input_signal_t *signal[DEBOUNCE_QUEUE];
 } debounce_queue_t;
 
+static bool limits_debounce = false;
+static uint32_t limits_invert;
 static debounce_queue_t debounce_queue = {0};
-static input_signal_t gpio0_signals[10] = {0}, gpio2_signals[10] = {0};
+static input_signal_t gpio0_signals[10] = {0}, gpio1_signals[10] = {0}, gpio2_signals[10] = {0};
 
 static input_signal_t inputpin[] = {
   #ifdef PROBE_PIN
@@ -169,35 +171,91 @@ static input_signal_t inputpin[] = {
 
 #if STEP_OUTMODE == GPIO_MAP
 
-    static const uint32_t c_step_outmap[8] = {
-        0,
-        X_STEP_BIT,
-        Y_STEP_BIT,
-        X_STEP_BIT|Y_STEP_BIT,
-        Z_STEP_BIT,
-        X_STEP_BIT|Z_STEP_BIT,
-        Y_STEP_BIT|Z_STEP_BIT,
-        X_STEP_BIT|Y_STEP_BIT|Z_STEP_BIT
-    };
+static const uint32_t c_step_outmap[] = {
+    0,
+    X_STEP_BIT,
+    Y_STEP_BIT,
+    Y_STEP_BIT | X_STEP_BIT,
+    Z_STEP_BIT,
+    Z_STEP_BIT | X_STEP_BIT,
+    Z_STEP_BIT | Y_STEP_BIT,
+    Z_STEP_BIT | Y_STEP_BIT | X_STEP_BIT,
+#if N_AXIS > 3
+    A_STEP_BIT,
+    A_STEP_BIT | X_STEP_BIT,
+    A_STEP_BIT | Y_STEP_BIT,
+    A_STEP_BIT | Y_STEP_BIT | X_STEP_BIT,
+    A_STEP_BIT | Z_STEP_BIT,
+    A_STEP_BIT | Z_STEP_BIT | X_STEP_BIT,
+    A_STEP_BIT | Z_STEP_BIT | Y_STEP_BIT,
+    A_STEP_BIT | Z_STEP_BIT | Y_STEP_BIT | X_STEP_BIT,
+#endif
+#if N_AXIS > 4
+    B_STEP_BIT,
+    B_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | Y_STEP_BIT,
+    B_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | Z_STEP_BIT,
+    B_STEP_BIT | Z_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | Z_STEP_BIT | Y_STEP_BIT,
+    B_STEP_BIT | Z_STEP_BIT | Y_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | Y_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | Y_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | Z_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | Z_STEP_BIT | X_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | Z_STEP_BIT | Y_STEP_BIT,
+    B_STEP_BIT | A_STEP_BIT | Z_STEP_BIT | Y_STEP_BIT | X_STEP_BIT,
+#endif
+};
 
-    static uint32_t step_outmap[8];
+static uint32_t step_outmap[sizeof(c_step_outmap) / sizeof(uint32_t)];
 
 #endif
 
 #if DIRECTION_OUTMODE == GPIO_MAP
 
-    static const uint32_t c_dir_outmap[8] = {
-        0,
-        X_DIRECTION_BIT,
-        Y_DIRECTION_BIT,
-        X_DIRECTION_BIT|Y_DIRECTION_BIT,
-        Z_DIRECTION_BIT,
-        X_DIRECTION_BIT|Z_DIRECTION_BIT,
-        Y_DIRECTION_BIT|Z_DIRECTION_BIT,
-        X_DIRECTION_BIT|Y_DIRECTION_BIT|Z_DIRECTION_BIT
-    };
+static const uint32_t c_dir_outmap[] = {
+    0,
+    X_DIRECTION_BIT,
+    Y_DIRECTION_BIT,
+    Y_DIRECTION_BIT | X_DIRECTION_BIT,
+    Z_DIRECTION_BIT,
+    Z_DIRECTION_BIT | X_DIRECTION_BIT,
+    Z_DIRECTION_BIT | Y_DIRECTION_BIT,
+    Z_DIRECTION_BIT | Y_DIRECTION_BIT | X_DIRECTION_BIT,
+#if N_AXIS > 3
+    A_DIRECTION_BIT,
+    A_DIRECTION_BIT | X_DIRECTION_BIT,
+    A_DIRECTION_BIT | Y_DIRECTION_BIT,
+    A_DIRECTION_BIT | Y_DIRECTION_BIT | X_DIRECTION_BIT,
+    A_DIRECTION_BIT | Z_DIRECTION_BIT,
+    A_DIRECTION_BIT | Z_DIRECTION_BIT | X_DIRECTION_BIT,
+    A_DIRECTION_BIT | Z_DIRECTION_BIT | Y_DIRECTION_BIT,
+    A_DIRECTION_BIT | Z_DIRECTION_BIT | Y_DIRECTION_BIT | X_DIRECTION_BIT,
+#endif
+#if N_AXIS > 4
+    B_DIRECTION_BIT,
+    B_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | Y_DIRECTION_BIT,
+    B_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | Z_DIRECTION_BIT,
+    B_DIRECTION_BIT | Z_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | Z_DIRECTION_BIT | Y_DIRECTION_BIT,
+    B_DIRECTION_BIT | Z_DIRECTION_BIT | Y_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | Y_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | Y_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | Z_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | Z_DIRECTION_BIT | X_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | Z_DIRECTION_BIT | Y_DIRECTION_BIT,
+    B_DIRECTION_BIT | A_DIRECTION_BIT | Z_DIRECTION_BIT | Y_DIRECTION_BIT | X_DIRECTION_BIT,
+#endif
+};
 
-    static uint32_t dir_outmap[8];
+static uint32_t dir_outmap[sizeof(c_dir_outmap) / sizeof(uint32_t)];
 
 #endif
 
@@ -373,38 +431,40 @@ inline static axes_signals_t limitsGetState()
 #if LIMIT_INMODE == LIMIT_SHIFT
     signals.value = (uint32_t)(LIMIT_PORT->PIN & LIMIT_MASK) >> LIMIT_SHIFT;
 #elif LIMIT_INMODE == GPIO_BITBAND
-    signals.x = BITBAND_GPIO(X_LIMIT_PORT->PIN, X_LIMIT_PIN)
-  #ifdef X_LIMIT_PORT_MAX
-    | BITBAND_GPIO(X_LIMIT_PORT_MAX->PIN, X_LIMIT_PIN_MAX);
-  #else
-    ;
-  #endif
-    signals.y = BITBAND_GPIO(Y_LIMIT_PORT->PIN, Y_LIMIT_PIN)
-  #ifdef X_LIMIT_PORT_MAX
-    | BITBAND_GPIO(Y_LIMIT_PORT_MAX->PIN, Y_LIMIT_PIN_MAX);
-  #else
-    ;
-  #endif
-    signals.z = BITBAND_GPIO(Z_LIMIT_PORT->PIN, Z_LIMIT_PIN)
-  #ifdef X_LIMIT_PORT_MAX
-    | BITBAND_GPIO(Y_LIMIT_PORT_MAX->PIN, Y_LIMIT_PIN_MAX);
-  #else
-    ;
-#endif
+    signals.x = BITBAND_GPIO(X_LIMIT_PORT->PIN, X_LIMIT_PIN);
+    signals.y = BITBAND_GPIO(Y_LIMIT_PORT->PIN, Y_LIMIT_PIN);
+    signals.z = BITBAND_GPIO(Z_LIMIT_PORT->PIN, Z_LIMIT_PIN);
 #else
     uint32_t bits = LIMIT_PORT->PIN;
-    signals.x = (bits & X_LIMIT_BIT) != 0
-#ifdef X_LIMIT_PORT_MAX
-  | (bits & X_LIMIT_BIT_MAX) != 0;
-#else
-  ;
-#endif
+    signals.x = (bits & X_LIMIT_BIT) != 0;
     signals.y = (bits & Y_LIMIT_BIT) != 0;
     signals.z = (bits & Z_LIMIT_BIT) != 0;
 #endif
 
     if (settings.limits.invert.mask)
         signals.value ^= settings.limits.invert.mask;
+
+#ifdef HAS_MAX_LIMIT_INPUTS
+
+    axes_signals_t signals_max;
+
+#ifdef X_LIMIT_PORT_MAX
+    signals_max.x = BITBAND_GPIO(X_LIMIT_PORT_MAX->PIN, X_LIMIT_PIN_MAX);
+#else
+    signals_max.x = (bits & X_LIMIT_BIT_MAX) != 0;
+#endif
+#ifdef Y_LIMIT_PORT_MAX
+    signals_max.y = BITBAND_GPIO(Y_LIMIT_PORT_MAX->PIN, Y_LIMIT_PIN_MAX);
+#else
+    signals_max.y = (bits & Y_LIMIT_BIT_MAX) != 0;
+#endif
+#ifdef Z_LIMIT_PORT_MAX
+    signals_max.z = BITBAND_GPIO(Z_LIMIT_PORT_MAX->PIN, Z_LIMIT_PIN_MAX);
+#else
+    signals_max.z = (bits & Z_LIMIT_BIT_MAX) != 0;
+#endif
+    signals.value |= (signals_max.value ^ settings.limits.invert.mask);
+#endif
 
     return signals;
 }
@@ -446,20 +506,21 @@ static control_signals_t systemGetState (void)
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
 static void probeConfigure(bool is_probe_away, bool probing)
 {
-  probe_invert_mask = settings.probe.invert_probe_pin ? 0 : PROBE_BIT;
+    probe.triggered = Off;
+    probe.is_probing = probing;
+    probe.inverted = settings.probe.invert_probe_pin;
 
-  if (is_probe_away)
-      probe_invert_mask ^= PROBE_BIT;
+    if (is_probe_away)
+        probe.inverted = !probe.inverted;
 }
 
 // Returns the probe connected and triggered pin states.
 probe_state_t probeGetState (void)
 {
-    probe_state_t state = {
-        .connected = On
-    };
+    probe_state_t state = {0};
 
-    state.triggered = ((PROBE_PORT->PIN & PROBE_BIT) ^ probe_invert_mask) != 0;
+    state.connected = probe.connected;
+    state.triggered = !!(PROBE_PORT->PIN & PROBE_BIT) ^ probe.inverted;
 
     return state;
 }
@@ -568,6 +629,7 @@ static spindle_state_t spindleGetState (void)
 static void coolantSetState (coolant_state_t mode)
 {
     mode.value ^= settings.coolant_invert.mask;
+
     BITBAND_GPIO(COOLANT_FLOOD_PORT->PIN, COOLANT_FLOOD_PIN) = mode.flood;
 #ifdef COOLANT_MIST_PORT
     BITBAND_GPIO(COOLANT_MIST_PORT->PIN, COOLANT_MIST_PIN) = mode.mist;
@@ -735,7 +797,7 @@ void settings_changed (settings_t *settings)
          *  Control, limit & probe pins config  *
          ****************************************/
 
-        bool pullup = true, irq_enable = false;
+        bool pullup = true;
 
         control_signals_t control_fei;
         control_fei.mask = settings->control_disable_pullup.mask ^ settings->control_invert.mask;
@@ -744,7 +806,9 @@ void settings_changed (settings_t *settings)
         limit_fei.mask = settings->limits.disable_pullup.mask ^ settings->limits.invert.mask;
 
         input_signal_t *pin;
-        uint32_t i = sizeof(inputpin) / sizeof(input_signal_t), a = 0, b = 0;
+        uint32_t i = sizeof(inputpin) / sizeof(input_signal_t), a = 0, b = 0, c = 0;
+
+        limits_invert = 0;
 
         do {
 
@@ -755,34 +819,30 @@ void settings_changed (settings_t *settings)
 
             if(pin->port != NULL) {
 
-                irq_enable = false;
+                pin->bit = 1 << pin->pin;
 
                 switch(pin->id) {
 
                   #ifdef RESET_PIN
                     case Input_Reset:
-                        irq_enable = true;
                         pullup = !settings->control_disable_pullup.reset;
                         pin->intr_type = control_fei.reset ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef FEED_HOLD_PIN
                     case Input_FeedHold:
-                        irq_enable = true;
                         pullup = !settings->control_disable_pullup.feed_hold;
                         pin->intr_type = control_fei.feed_hold ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef CYCLE_START_PIN
                     case Input_CycleStart:
-                        irq_enable = true;
                         pullup = !settings->control_disable_pullup.cycle_start;
                         pin->intr_type = control_fei.cycle_start ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef SAFETY_DOOR_PIN
                     case Input_SafetyDoor:
-                        irq_enable = true;
                         pullup = !settings->control_disable_pullup.safety_door_ajar;
                         pin->intr_type = control_fei.safety_door_ajar ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
@@ -791,74 +851,99 @@ void settings_changed (settings_t *settings)
                   #ifdef PROBE_PIN
                     case Input_Probe:
                         pullup = hal.driver_cap.probe_pull_up;
+                        pin->intr_type = GPIO_Intr_None;
                         break;
                   #endif
 
                     case Input_LimitX:
+                        if(settings->limits.invert.x)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.x;
                         pin->intr_type = limit_fei.x ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
 
                     case Input_LimitY:
+                        if(settings->limits.invert.y)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.y;
                         pin->intr_type = limit_fei.y ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
 
                     case Input_LimitZ:
+                        if(settings->limits.invert.z)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.z;
                         pin->intr_type = limit_fei.z ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
 
                   #ifdef X_LIMIT_PIN_MAX
                     case Input_LimitX_Max:
-                        pullup = !settings->limits.disable_pullup.x;
+                        if(settings->limits.invert.x)
+                            limits_invert |= pin->bit;
+                       pullup = !settings->limits.disable_pullup.x;
                         pin->intr_type = limit_fei.x ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef Y_LIMIT_PIN_MAX
                     case Input_LimitY_Max:
+                        if(settings->limits.invert.y)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.y;
                         pin->intr_type = limit_fei.y ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef Z_LIMIT_PIN_MAX
                     case Input_LimitZ_Max:
+                        if(settings->limits.invert.z)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.z;
                         pin->intr_type = limit_fei.z ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef A_LIMIT_PIN
                     case Input_LimitA:
+                        if(settings->limits.invert.a)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.a;
                         pin->intr_type = limit_fei.a ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef A_LIMIT_PIN_MAX
                     case Input_LimitA_Max:
+                        if(settings->limits.invert.a)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.a;
                         pin->intr_type = limit_fei.a ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef B_LIMIT_PIN
                     case Input_LimitB:
+                        if(settings->limits.invert.b)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.b;
                         pin->intr_type = limit_fei.b ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef B_LIMIT_PIN_MAX
                     case Input_LimitB_Max:
+                        if(settings->limits.invert.b)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.b;
                         pin->intr_type = limit_fei.b ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef C_LIMIT_PIN
                     case Input_LimitC:
+                        if(settings->limits.invert.c)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.c;
                         pin->intr_type = limit_fei.c ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
                   #endif
                   #ifdef C_LIMIT_PIN_MAX
                     case Input_LimitC_Max:
+                        if(settings->limits.invert.c)
+                            limits_invert |= pin->bit;
                         pullup = !settings->limits.disable_pullup.c;
                         pin->intr_type = limit_fei.c ? GPIO_Intr_Falling : GPIO_Intr_Rising;
                         break;
@@ -867,7 +952,6 @@ void settings_changed (settings_t *settings)
                   #if KEYPAD_ENABLE
                     case Input_KeypadStrobe:
                         pullup = true;
-                        irq_enable = true;
                         pin->intr_type = GPIO_Intr_Both; // -> any edge?
                         break;
                   #endif
@@ -876,14 +960,13 @@ void settings_changed (settings_t *settings)
                         break;
                 }
 
-                pin->bit = 1 << pin->pin;
 
                 gpio_pinmode(pin->port, pin->pin, pullup);
 
                 // GPIO1, GPIO3 and GPIO4 are not interrupt capable ports
-                if(pin->port == LPC_GPIO1 || pin->port == LPC_GPIO3 || pin->port == LPC_GPIO4) {
+                if(pin->port == LPC_GPIO3 || pin->port == LPC_GPIO4) {
 
-                    if(irq_enable) {
+                    if(pin->intr_type != GPIO_Intr_None) {
                         hal.stream.write("[MSG:Bad bin configuration]" ASCII_EOL);
                         while(true);
                     }
@@ -892,16 +975,18 @@ void settings_changed (settings_t *settings)
                         pin->intr_type = GPIO_Intr_None;
                 }
 
-                if(irq_enable) {
+                if(pin->intr_type != GPIO_Intr_None) {
 
                     pin->debounce = hal.driver_cap.software_debounce && !(pin->group == INPUT_GROUP_PROBE || pin->group == INPUT_GROUP_KEYPAD);
 
                     if(pin->port == LPC_GPIO0) {
                         gpio0_int_enable(pin->bit, pin->intr_type);
                         memcpy(&gpio0_signals[a++], &inputpin[i], sizeof(input_signal_t));
+                    } else if(pin->port == LPC_GPIO1) {
+                        memcpy(&gpio1_signals[b++], &inputpin[i], sizeof(input_signal_t));
                     } else if(pin->port == LPC_GPIO2) {
                         gpio2_int_enable(pin->bit, pin->intr_type);
-                        memcpy(&gpio2_signals[b++], &inputpin[i], sizeof(input_signal_t));
+                        memcpy(&gpio2_signals[c++], &inputpin[i], sizeof(input_signal_t));
                     }
                 }
             }
@@ -951,6 +1036,9 @@ static bool driver_setup (settings_t *settings)
 #else
     BITBAND_GPIO(STEPPERS_DISABLE_PORT->DIR, STEPPERS_DISABLE_PIN) = 1;
 #endif
+
+    Chip_TIMER_Init(STEPPER_TIMER);
+    Chip_TIMER_Init(PULSE_TIMER);
 
     STEPPER_TIMER->TCR = 0;            // disable
     STEPPER_TIMER->CTCR = 0;           // timer mode
@@ -1013,10 +1101,9 @@ static bool driver_setup (settings_t *settings)
 
  // Set defaults
 
-    IOInitDone = settings->version == 18;
+    IOInitDone = settings->version == 19;
 
-    settings_changed(settings);
-
+    hal.settings_changed(settings);
     hal.spindle.set_state((spindle_state_t){0}, 0.0f);
     hal.coolant.set_state((coolant_state_t){0});
     stepperSetDirOutputs((axes_signals_t){0});
@@ -1034,7 +1121,7 @@ bool driver_init (void) {
     SystemCoreClockUpdate();
 
     Chip_SetupXtalClocking(); // Sets 96 MHz clock
-    Chip_SYSCTL_SetFLASHAccess(FLASHTIM_100MHZ_CPU);
+    Chip_SYSCTL_SetFLASHAccess(FLASHTIM_120MHZ_CPU);
 
     SystemCoreClockUpdate();
 
@@ -1043,11 +1130,15 @@ bool driver_init (void) {
 
     // Enable and set SysTick IRQ to lowest priority
     SysTick->LOAD = (SystemCoreClock / 1000) - 1;
-    SysTick->CTRL |= SysTick_CTRL_CLKSOURCE_Msk|SysTick_CTRL_TICKINT_Msk;
+    SysTick->CTRL |= SysTick_CTRL_CLKSOURCE_Msk|SysTick_CTRL_TICKINT_Msk|SysTick_CTRL_ENABLE_Msk;
     NVIC_SetPriority(SysTick_IRQn, (1 << __NVIC_PRIO_BITS) - 1);
 
+#if I2C_ENABLE
+    i2c_init();
+#endif
+
     hal.info = "LCP1769";
-    hal.driver_version = "201014";
+    hal.driver_version = "201215";
     hal.driver_setup = driver_setup;
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
@@ -1104,7 +1195,7 @@ bool driver_init (void) {
 #endif
 
 #if EEPROM_ENABLE
-    eepromInit();
+    i2c_eeprom_init();
 #elif FLASH_ENABLE
     hal.nvs.type = NVS_Flash;
     hal.nvs.memcpy_from_flash = memcpy_from_flash;
@@ -1139,6 +1230,10 @@ bool driver_init (void) {
     hal.driver_cap.probe_pull_up = On;
 #if SDCARD_ENABLE
     hal.driver_cap.sd_card = On;
+#endif
+
+#ifdef HAS_BOARD_INIT
+    board_init();
 #endif
 
     my_plugin_init();
@@ -1227,13 +1322,14 @@ void DEBOUNCE_IRQHandler (void)
 
         if(signal->port == LPC_GPIO0)
             gpio0_int_enable(signal->bit, signal->intr_type);
-        else
+        else if(signal->port == LPC_GPIO2)
             gpio2_int_enable(signal->bit, signal->intr_type);
 
         if(BITBAND_GPIO(signal->port->PIN, signal->pin) == (signal->intr_type == GPIO_Intr_Falling ? 0 : 1))
           switch(signal->group) {
 
             case INPUT_GROUP_LIMIT:
+                limits_debounce = false;
                 hal.limits.interrupt_callback(limitsGetState());
                 break;
 
@@ -1306,12 +1402,45 @@ void GPIO_IRQHandler (void)
 // Interrupt handler for 1 ms interval timer
 void SysTick_Handler (void)
 {
-#if SDCARD_ENABLE
+#ifdef LIMITS_POLL_PORT // Poll limit pins when hard limits enabled
+    static uint32_t limits_state = 0, limits = 0;
+    if(settings.limits.flags.hard_enabled) {
+        limits = (LIMITS_POLL_PORT->PIN ^ limits_invert) & LIMIT_MASK;
+        if(limits_state && limits == 0 && !limits_debounce)
+            limits_state = 0;
+        else if(limits_state != limits && limits) {
+
+           uint32_t i = 0;
+           while(gpio1_signals[i].port != NULL) {
+                if(limits & gpio1_signals[i].bit && gpio1_signals[i].debounce && enqueue_debounce(&gpio1_signals[i]))
+                    limits_debounce = true;
+                i++;
+            }
+
+            if(limits_debounce) {
+                // Reset and start
+                DEBOUNCE_TIMER->TCR = 0;
+                DEBOUNCE_TIMER->TC = 1;
+                DEBOUNCE_TIMER->TCR = 0b10;
+                while(DEBOUNCE_TIMER->TC != 0);
+                DEBOUNCE_TIMER->TCR = 0b01;
+            } else
+                hal.limits.interrupt_callback(limitsGetState());
+
+            limits_state = limits;
+        }
+    }
+#endif
+
+#if SDCARD_ENABLE || LIMIT_PN == 1
+
+  #if SDCARD_ENABLE
     static uint32_t fatfs_ticks = 10;
     if(!(--fatfs_ticks)) {
         disk_timerproc();
         fatfs_ticks = 10;
     }
+  #endif
     if(delay.ms && !(--delay.ms)) {
         if(delay.callback) {
             delay.callback();

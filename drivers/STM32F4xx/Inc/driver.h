@@ -155,6 +155,8 @@
   #include "uno_map.h"
 #elif defined(BOARD_MORPHO_CNC)
   #include "st_morpho_map.h"
+#elif defined(BOARD_MORPHO_DAC_CNC)
+  #include "st_morpho_dac_map.h"
 #else // default board
   #include "generic_map.h"
 #endif
@@ -182,15 +184,12 @@
   #endif
 #endif
 
-#if TRINAMIC_ENABLE
+#if TRINAMIC_ENABLE == 2130
 #include "tmc2130/trinamic.h"
 #endif
 
-#if SDCARD_ENABLE
-#define SD_CS_PORT  GPIOC
-#define SD_CS_PIN   8
-#define SD_CS_BIT   (1<<SD_CS_PIN)
-#define SPI_PORT 1 // GPIOA, SCK_PIN = 5, MISO_PIN = 6, MOSI_PIN = 7
+#if TRINAMIC_ENABLE == 2209
+#include "tmc2209/trinamic.h"
 #endif
 
 // End configuration
@@ -201,10 +200,6 @@
 
 #if SDCARD_ENABLE && !defined(SD_CS_PORT)
 #error SD card plugin not supported!
-#endif
-
-#if TRINAMIC_ENABLE && CNC_BOOSTERPACK == 0
-#error Trinamic plugin not supported!
 #endif
 
 bool driver_init (void);

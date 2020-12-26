@@ -1,7 +1,7 @@
 /*
   settings.h - non-volatile storage configuration handling
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2017-2020 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
@@ -26,24 +26,37 @@
 
 #include "config.h"
 #include "system.h"
+#include "plugins.h"
 
 // Version of the persistent storage data. Will be used to migrate existing data from older versions of Grbl
 // when firmware is upgraded. Always stored in byte 0 of non-volatile storage
-#define SETTINGS_VERSION 18  // NOTE: Check settings_reset() when moving to next version.
-
+#define SETTINGS_VERSION 19  // NOTE: Check settings_reset() when moving to next version.
 
 // Define axis settings numbering scheme. Starts at Setting_AxisSettingsBase, every INCREMENT, over N_SETTINGS.
-#ifdef ENABLE_BACKLASH_COMPENSATION
-#define AXIS_N_SETTINGS          6
-#else
-#define AXIS_N_SETTINGS          4
-#endif
 #define AXIS_SETTINGS_INCREMENT  10 // Must be greater than the number of axis settings TODO: change to 100 to allow for a logical wider range of parameters?
 
 // Define encoder settings numbering scheme. Starts at Setting_EncoderSettingsBase, every INCREMENT, over N_SETTINGS.
 // Not referenced by the core.
 #define ENCODER_N_SETTINGS_MAX 5 // NOTE: This is the maximum number of encoders allowed.
 #define ENCODER_SETTINGS_INCREMENT 10
+
+typedef enum {
+    AxisSetting_StepsPerMM = 0,
+    AxisSetting_MaxRate = 1,
+    AxisSetting_Acceleration = 2,
+    AxisSetting_MaxTravel = 3,
+    AxisSetting_StepperCurrent = 4, // TODO: move to axis settings for driver?, 200+
+    AxisSetting_MicroSteps = 5,     // TODO: move to axis settings for driver?, 200+
+    AxisSetting_Backlash = 6,
+    AxisSetting_AutoSquareOffset = 7,
+    AxisSetting_NumSettings
+} axis_setting_type_t;
+
+typedef enum {
+    DriverAxisSetting_MicroSteps = 0,
+    DriverAxisSetting_StepperCurrent = 1,
+    DriverAxisSetting_NumSettings
+} driver_axis_setting_type_t;
 
 typedef enum {
     Setting_PulseMicroseconds = 0,
@@ -152,12 +165,14 @@ typedef enum {
     Setting_PositionDMaxError = 96,
 //
 
-    Setting_AxisSettingsBase = 100, // NOTE: Reserving settings values >= 100 for axis settings. Up to 255.
-    Setting_AxisSettingsMax = 255,
+// Reserving settings values >= 100 for axis settings. Up to 259. TODO: Or should that be 299...
+    Setting_AxisSettingsBase = 100,     // Reserved for core settings, up to 100 + AXIS_SETTINGS_INCREMENT * N_AXIS
+    Setting_AxisSettingsMax = 199,
+    Setting_AxisSettingsBase2 = 200,    // Reserved for driver settings, up to 200 + AXIS_SETTINGS_INCREMENT * N_AXIS
+    Setting_AxisSettingsMax2 = 255,
+//
 
 // Optional driver implemented settings
-    Setting_TrinamicDriver = 256,
-    Setting_TrinamicHoming = 257,
 
     // Normally used for Ethernet or WiFi Station
     Setting_Hostname = 300,
@@ -191,11 +206,19 @@ typedef enum {
     Setting_AdminPassword = 330,
     Setting_UserPassword = 331,
 
+    Setting_TrinamicDriver = 338,
+    Setting_TrinamicHoming = 339,
+
     Setting_SpindleAtSpeedTolerance = 340,
     Setting_ToolChangeMode = 341,
     Setting_ToolChangeProbingDistance = 342,
     Setting_ToolChangeFeedRate = 343,
     Setting_ToolChangeSeekRate = 344,
+    Setting_ToolChangePulloffRate = 345,
+
+    Setting_DualAxisLengthFailPercent = 347,
+    Setting_DualAxisLengthFailMin = 348,
+    Setting_DualAxisLengthFailMax = 349,
 
     Setting_THC_Mode = 350,
     Setting_THC_Delay = 351,
@@ -218,6 +241,8 @@ typedef enum {
     Settings_IoPort_Pullup_Disable = 371,
     Settings_IoPort_InvertOut = 372,
     Settings_IoPort_OD_Enable = 373,
+    Settings_ModBus_BaudRate = 374,
+    Settings_ModBus_RXTimeout = 375,
 
     Setting_EncoderSettingsBase = 400, // NOTE: Reserving settings values >= 400 for encoder settings. Up to 449.
     Setting_EncoderSettingsMax = 449,
@@ -234,25 +259,29 @@ typedef enum {
     Setting_UserDefined_8 = 458,
     Setting_UserDefined_9 = 459,
 
-    Setting_SettingsMax
-//
-} setting_type_t;
+    Setting_SettingsMax,
+    Setting_SettingsAll = Setting_SettingsMax,
 
-typedef enum {
-    AxisSetting_StepsPerMM = 0,
-    AxisSetting_MaxRate = 1,
-    AxisSetting_Acceleration = 2,
-    AxisSetting_MaxTravel = 3,
-    AxisSetting_StepperCurrent = 4,
-    AxisSetting_MicroSteps = 5,
-    AxisSetting_Backlash = 6
-    /*
-    AxisSetting_P_Gain = 7,
-    AxisSetting_I_Gain = 8,
-    AxisSetting_D_Gain = 9,
-    AxisSetting_I_MaxError = 10
-    */
-} axis_setting_type_t;
+    // Calculated base values for stepper settings
+    Setting_AxisStepsPerMMBase       = Setting_AxisSettingsBase + AxisSetting_StepsPerMM * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisMaxRateBase          = Setting_AxisSettingsBase + AxisSetting_MaxRate * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisAccelerationBase     = Setting_AxisSettingsBase + AxisSetting_Acceleration * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisMaxTravelBase        = Setting_AxisSettingsBase + AxisSetting_MaxTravel * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisStepperCurrentBase   = Setting_AxisSettingsBase + AxisSetting_StepperCurrent * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisMicroStepsBase       = Setting_AxisSettingsBase + AxisSetting_MicroSteps * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisBacklashBase         = Setting_AxisSettingsBase + AxisSetting_Backlash * AXIS_SETTINGS_INCREMENT,
+    Setting_AxisAutoSquareOffsetBase = Setting_AxisSettingsBase + AxisSetting_AutoSquareOffset * AXIS_SETTINGS_INCREMENT,
+
+    // Calculated base values for driver stepper settings
+    Setting_DriverAxisStepsPerMMBase    = Setting_AxisSettingsBase2 + DriverAxisSetting_MicroSteps * AXIS_SETTINGS_INCREMENT,
+    Setting_DriverAxisMaxRateBase       = Setting_AxisSettingsBase2 + DriverAxisSetting_StepperCurrent * AXIS_SETTINGS_INCREMENT,
+
+    // Calculated base values for encoder settings
+    Setting_EncoderModeBase           = Setting_EncoderSettingsBase + Setting_EncoderMode,
+    Setting_EncoderCPRBase            = Setting_EncoderSettingsBase + Setting_EncoderCPR,
+    Setting_EncoderCPDBase            = Setting_EncoderSettingsBase + Setting_EncoderCPD,
+    Setting_EncoderDblClickWindowBase = Setting_EncoderSettingsBase + Setting_EncoderDblClickWindow
+} setting_type_t;
 
 typedef union {
     uint8_t mask;
@@ -376,7 +405,8 @@ typedef union {
                 init_lock            :1,
                 force_set_origin     :1,
                 manual               :1,
-                unassigned           :3;
+                override_locks       :1,
+                unassigned           :2;
     };
 } homing_settings_flags_t;
 
@@ -395,7 +425,7 @@ typedef struct {
     uint16_t debounce_delay;
     homing_settings_flags_t flags;
     axes_signals_t cycle[N_AXIS];
-//    homing_dual_axis_t dual_axis;
+    homing_dual_axis_t dual_axis;
 } homing_settings_t;
 
 typedef struct {
@@ -413,6 +443,7 @@ typedef struct {
     float max_rate;
     float acceleration;
     float max_travel;
+    float dual_axis_offset;
 #ifdef ENABLE_BACKLASH_COMPENSATION
     float backlash;
 #endif
@@ -475,6 +506,7 @@ typedef enum {
 typedef struct {
     float feed_rate;
     float seek_rate;
+    float pulloff_rate;
     float probing_distance;
     toolchange_mode_t mode;
 } tool_change_settings_t;
@@ -504,10 +536,99 @@ typedef struct {
     ioport_signals_t ioport;
 } settings_t;
 
+typedef enum {
+    Group_Root = 0,
+    Group_General,
+    Group_ControlSignals,
+    Group_Limits,
+    Group_Limits_DualAxis,
+    Group_Coolant,
+    Group_Spindle,
+    Group_Spindle_Sync,
+    Group_Spindle_ClosedLoop,
+    Group_Toolchange,
+    Group_Plasma,
+    Group_Homing,
+    Group_Probing,
+    Group_Parking,
+    Group_Jogging,
+    Group_Networking,
+    Group_Networking_Wifi,
+    Group_Bluetooth,
+    Group_AuxPorts,
+    Group_ModBus,
+    Group_Encoders,
+    Group_Encoder0,
+    Group_Encoder1,
+    Group_Encoder2,
+    Group_Encoder3,
+    Group_Encoder4,
+    Group_UserSettings,
+    Group_Stepper,
+    Group_MotorDriver,
+    Group_Axis,
+// NOTE: axis groups MUST be sequential AND last
+    Group_Axis0,
+    Group_XAxis = Group_Axis0,
+    Group_YAxis,
+    Group_ZAxis,
+#ifdef A_AXIS
+    Group_AAxis,
+#endif
+#ifdef B_AXIS
+    Group_BAxis,
+#endif
+#ifdef C_AXIS
+    Group_CAxis,
+#endif
+    Group_All = Group_Root
+} setting_group_t;
+
+typedef enum {
+    Format_Bool = 0,
+    Format_Bitfield,
+    Format_XBitfield,
+    Format_RadioButtons,
+    Format_AxisMask,
+    Format_Integer,
+    Format_Decimal,
+    Format_String,
+    Format_Password,
+    Format_IPv4
+} setting_format_t;
+
+typedef struct {
+    setting_group_t parent;
+    setting_group_t id;
+    const char *name;
+} setting_group_detail_t;
+
+typedef struct {
+    setting_type_t id;
+    setting_group_t group;
+    const char *name;
+    const char *unit;
+    setting_format_t type;
+    const char *format;
+    const char *min_value;
+    const char *max_value;
+} setting_detail_t;
+
+typedef struct setting_details {
+    const uint8_t n_groups;
+    const setting_group_detail_t *groups;
+    const uint16_t n_settings;
+    const setting_detail_t *settings;
+    struct setting_details *(*on_report_settings)(void);
+} setting_details_t;
+
 extern settings_t settings;
 
 // Initialize the configuration subsystem (load settings from persistent storage)
 void settings_init();
+
+// Write Grbl global settings and version number to persistent storage
+void settings_write_global(void);
 
 // Helper function to clear and restore persistent storage defaults
 void settings_restore(settings_restore_t restore_flags);
@@ -538,5 +659,9 @@ bool settings_write_tool_data (tool_data_t *tool_data);
 
 // Read selected tool data from persistent storage
 bool settings_read_tool_data (uint32_t tool, tool_data_t *tool_data);
+
+setting_details_t *settings_get_details (void);
+bool settings_is_group_available (setting_group_t group);
+bool settings_is_setting_available (setting_type_t setting, setting_group_t group);
 
 #endif

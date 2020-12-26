@@ -1,7 +1,7 @@
 /*
   protocol.c - controls Grbl execution protocol and procedures
 
-  Part of GrblHAL
+  Part of grblHAL
 
   Copyright (c) 2017-2020 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
@@ -32,6 +32,7 @@
 #include "motion_control.h"
 #include "sleep.h"
 #include "protocol.h"
+#include "limits.h"
 
 #ifndef RT_QUEUE_SIZE
 #define RT_QUEUE_SIZE 8 // must be a power of 2
@@ -93,35 +94,40 @@ bool protocol_enqueue_gcode (char *gcode)
 /*
   GRBL PRIMARY LOOP:
 */
-bool protocol_main_loop(bool cold_start)
+bool protocol_main_loop (void)
 {
-    if (hal.control.get_state().e_stop) {
+    if(sys.alarm == Alarm_SelftestFailed) {
+        system_raise_alarm(Alarm_SelftestFailed);
+    } else if (hal.control.get_state().e_stop) {
         // Check for e-stop active. Blocks everything until cleared.
-        set_state(STATE_ESTOP);
-        report_alarm_message(Alarm_EStop);
+        system_raise_alarm(Alarm_EStop);
         grbl.report.feedback_message(Message_EStop);
-    } else if (settings.homing.flags.enabled && sys.homing.mask && settings.homing.flags.init_lock && (sys.homing.mask & sys.homed.mask) == sys.homing.mask) {
+    } else if (limits_homing_required()) {
         // Check for power-up and set system alarm if homing is enabled to force homing cycle
         // by setting Grbl's alarm state. Alarm locks out all g-code commands, including the
         // startup scripts, but allows access to settings and internal commands.
         // Only a successful homing cycle '$H' will disable the alarm.
         // NOTE: The startup script will run after successful completion of the homing cycle. Prevents motion startup
         // blocks from crashing into things uncontrollably. Very bad.
-        set_state(STATE_ALARM); // Ensure alarm state is active.
-        report_alarm_message(Alarm_HomingRequried);
+        system_raise_alarm(Alarm_HomingRequried);
         grbl.report.feedback_message(Message_HomingCycleRequired);
     } else if (settings.limits.flags.hard_enabled && settings.limits.flags.check_at_init && hal.limits.get_state().value) {
-        // Check that no limit switches are engaged to make sure everything is good to go.
-        set_state(STATE_ALARM); // Ensure alarm state is active.
-        report_alarm_message(Alarm_LimitsEngaged);
-        grbl.report.feedback_message(Message_CheckLimits);
-    } else if(cold_start && (settings.flags.force_initialization_alarm || hal.control.get_state().reset)) {
+        if(sys.alarm == Alarm_LimitsEngaged && hal.control.get_state().limits_override)
+            set_state(STATE_IDLE); // Clear alarm state to enable limit switch pulloff.
+        else {
+            // Check that no limit switches are engaged to make sure everything is good to go.
+            system_raise_alarm(Alarm_LimitsEngaged);
+            grbl.report.feedback_message(Message_CheckLimits);
+        }
+    } else if(sys.cold_start && (settings.flags.force_initialization_alarm || hal.control.get_state().reset)) {
         set_state(STATE_ALARM); // Ensure alarm state is set.
         grbl.report.feedback_message(Message_AlarmLock);
     } else if (sys.state & (STATE_ALARM|STATE_SLEEP)) {
         // Check for and report alarm state after a reset, error, or an initial power up.
         // NOTE: Sleep mode disables the stepper drivers and position can't be guaranteed.
         // Re-initialize the sleep state as an ALARM mode to ensure user homes or acknowledges.
+        if(sys.alarm == Alarm_HomingRequried)
+            sys.alarm = Alarm_None; // Clear Alarm_HomingRequried as the lock has been overridden by a soft reset.
         set_state(STATE_ALARM); // Ensure alarm state is set.
         grbl.report.feedback_message(Message_AlarmLock);
     } else {
@@ -138,7 +144,7 @@ bool protocol_main_loop(bool cold_start)
     }
 
     // Ensure spindle and coolant is switched off on a cold start
-    if(cold_start) {
+    if(sys.cold_start) {
         hal.spindle.set_state((spindle_state_t){0}, 0.0f);
         hal.coolant.set_state((coolant_state_t){0});
         if(realtime_queue.head != realtime_queue.tail)
@@ -201,8 +207,7 @@ bool protocol_main_loop(bool cold_start)
                     gc_state.last_error = Status_OK;
                 else if (line[0] == '$') {// Grbl '$' system command
                     if((gc_state.last_error = system_execute_line(line)) == Status_LimitsEngaged) {
-                        set_state(STATE_ALARM); // Ensure alarm state is active.
-                        report_alarm_message(Alarm_LimitsEngaged);
+                        system_raise_alarm(Alarm_LimitsEngaged);
                         grbl.report.feedback_message(Message_CheckLimits);
                     }
                 } else if (line[0] == '[' && grbl.on_user_command)
@@ -333,7 +338,7 @@ bool protocol_main_loop(bool cold_start)
 
 // Block until all buffered steps are executed or in a cycle state. Works with feed hold
 // during a synchronize call, if it should happen. Also, waits for clean cycle end.
-bool protocol_buffer_synchronize ()
+bool protocol_buffer_synchronize (void)
 {
     bool ok = true;
     // If system is queued, ensure cycle resumes if the auto start flag is present.
@@ -350,7 +355,7 @@ bool protocol_buffer_synchronize ()
 // when one of these conditions exist respectively: There are no more blocks sent (i.e. streaming
 // is finished, single commands), a command that needs to wait for the motions in the buffer to
 // execute calls a buffer sync, or the planner buffer is full and ready to go.
-void protocol_auto_cycle_start ()
+void protocol_auto_cycle_start (void)
 {
     if (plan_get_current_block() != NULL) // Check if there are any blocks in the buffer.
         system_set_exec_state_flag(EXEC_CYCLE_START); // If so, execute them!
@@ -369,7 +374,7 @@ void protocol_auto_cycle_start ()
 // NOTE: The sys_rt_exec_state variable flags are set by any process, step or input strea events, pinouts,
 // limit switches, or the main program.
 // Returns false if aborted
-bool protocol_execute_realtime ()
+bool protocol_execute_realtime (void)
 {
     if(protocol_exec_rt_system()) {
 
@@ -388,20 +393,21 @@ bool protocol_execute_realtime ()
 // Executes run-time commands, when required. This function primarily operates as Grbl's state
 // machine and controls the various real-time features Grbl has to offer.
 // NOTE: Do not alter this unless you know exactly what you are doing!
-bool protocol_exec_rt_system ()
+bool protocol_exec_rt_system (void)
 {
     uint_fast16_t rt_exec;
+    bool killed = false;
 
     if (sys_rt_exec_alarm && (rt_exec = system_clear_exec_alarm())) { // Enter only if any bit flag is true
 
         // System alarm. Everything has shutdown by something that has gone severely wrong. Report
         // the source of the error to the user. If critical, Grbl disables by entering an infinite
         // loop until system reset/abort.
-        set_state((alarm_code_t)rt_exec == Alarm_EStop ? STATE_ESTOP : STATE_ALARM); // Set system alarm state
-        report_alarm_message((alarm_code_t)rt_exec);
+        system_raise_alarm((alarm_code_t)rt_exec);
 
         if(sys_rt_exec_state & EXEC_RESET) {
             // Kill spindle and coolant.
+            killed = true;
             hal.spindle.set_state((spindle_state_t){0}, 0.0f);
             hal.coolant.set_state((coolant_state_t){0});
             // Tell driver/plugins about reset.
@@ -434,13 +440,13 @@ bool protocol_exec_rt_system ()
 
         // Execute system abort.
         if (rt_exec & EXEC_RESET) {
-
-            // Kill spindle and coolant.
-            hal.spindle.set_state((spindle_state_t){0}, 0.0f);
-            hal.coolant.set_state((coolant_state_t){0});
-            // Tell driver/plugins about reset.
-            hal.driver_reset();
-
+            if(!killed) {
+                // Kill spindle and coolant.
+                hal.spindle.set_state((spindle_state_t){0}, 0.0f);
+                hal.coolant.set_state((coolant_state_t){0});
+                // Tell driver/plugins about reset.
+                hal.driver_reset();
+            }
             sys.abort = !hal.control.get_state().e_stop;  // Only place this is set true.
             return !sys.abort; // Nothing else to do but exit.
         }
@@ -470,7 +476,7 @@ bool protocol_exec_rt_system ()
             if(hal.stream.suspend_read && hal.stream.suspend_read(false))
                 hal.stream.cancel_read_buffer(); // flush pending blocks (after M6)
 
-            gc_init(false);
+            gc_init();
             plan_reset();
 /*            if(sys.alarm_pending == Alarm_ProbeProtect) {
                 st_go_idle();
@@ -480,7 +486,8 @@ bool protocol_exec_rt_system ()
             st_reset();
             sync_position();
             flush_override_buffers();
-            set_state(STATE_IDLE);
+            if(!((sys.state == STATE_ALARM) && (sys.alarm == Alarm_LimitsEngaged || sys.alarm == Alarm_HomingRequried)))
+                set_state(STATE_IDLE);
         }
 
         // Execute and print status to output stream
@@ -652,7 +659,7 @@ bool protocol_exec_rt_system ()
 // whatever function that invoked the suspend, such that Grbl resumes normal operation.
 // This function is written in a way to promote custom parking motions. Simply use this as a
 // template.
-static void protocol_exec_rt_suspend ()
+static void protocol_exec_rt_suspend (void)
 {
     while (sys.suspend) {
 

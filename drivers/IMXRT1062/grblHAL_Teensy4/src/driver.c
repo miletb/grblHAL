@@ -74,6 +74,15 @@ static void ppi_timeout_isr (void);
 #include "usb_serial_pjrc.h"
 #endif
 
+#if defined(ENABLE_SAFETY_DOOR_INPUT_PIN) && defined(SAFETY_DOOR_PIN)
+#define SAFETY_DOOR_ENABLE 1
+#else
+#define SAFETY_DOOR_ENABLE 0
+#ifdef SAFETY_DOOR_PIN
+//#define LIMITS_OVERRIDE_PIN SAFETY_DOOR_PIN
+#endif
+#endif
+
 #define DEBOUNCE_QUEUE 8 // Must be a power of 2
 
 #define F_BUS_MHZ (F_BUS_ACTUAL / 1000000)
@@ -145,14 +154,32 @@ static gpio_t spindleEnable, spindleDir;
 #endif
 
 // Optional I/O
-#ifdef SAFETY_DOOR_PIN
+#if SAFETY_DOOR_ENABLE
 static gpio_t SafetyDoor;
+#endif
+#ifdef LIMITS_OVERRIDE_PIN
+static gpio_t LimitsOverride;
 #endif
 #ifdef A_AXIS
 static gpio_t stepA, dirA, LimitA;
+#ifdef A_ENABLE_PIN
+static gpio_t enableA;
+#endif
 #endif
 #ifdef B_AXIS
 static gpio_t stepB, dirB, LimitB;
+#ifdef B_ENABLE_PIN
+static gpio_t enableB;
+#endif
+#endif
+#ifdef C_AXIS
+static gpio_t stepC, dirC;
+#ifdef C_ENABLE_PIN
+static gpio_t enableC;
+#endif
+#ifdef C_LIMIT_PIN
+static gpio_t LimitC;
+#endif
 #endif
 #ifdef STEPPERS_ENABLE_PIN
 static gpio_t steppersEnable;
@@ -165,12 +192,6 @@ static gpio_t enableY;
 #endif
 #ifdef Z_ENABLE_PIN
 static gpio_t enableZ;
-#endif
-#ifdef A_ENABLE_PIN
-static gpio_t enableA;
-#endif
-#ifdef B_ENABLE_PIN
-static gpio_t enableB;
 #endif
 #if KEYPAD_ENABLE
 static gpio_t KeypadStrobe;
@@ -235,56 +256,60 @@ static gpio_t QEI_A, QEI_B;
 
 static input_signal_t inputpin[] = {
 #if ESTOP_ENABLE
-    { .id = Input_EStop,        .port = &Reset,        .pin = RESET_PIN,         .group = INPUT_GROUP_CONTROL },
+    { .id = Input_EStop,          .port = &Reset,          .pin = RESET_PIN,           .group = INPUT_GROUP_CONTROL },
 #else
-    { .id = Input_Reset,        .port = &Reset,        .pin = RESET_PIN,         .group = INPUT_GROUP_CONTROL },
+    { .id = Input_Reset,          .port = &Reset,          .pin = RESET_PIN,           .group = INPUT_GROUP_CONTROL },
 #endif
-    { .id = Input_FeedHold,     .port = &FeedHold,     .pin = FEED_HOLD_PIN,     .group = INPUT_GROUP_CONTROL },
-    { .id = Input_CycleStart,   .port = &CycleStart,   .pin = CYCLE_START_PIN,   .group = INPUT_GROUP_CONTROL },
-#ifdef SAFETY_DOOR_PIN
-    { .id = Input_SafetyDoor,   .port = &SafetyDoor ,  .pin = SAFETY_DOOR_PIN,   .group = INPUT_GROUP_CONTROL },
+    { .id = Input_FeedHold,       .port = &FeedHold,       .pin = FEED_HOLD_PIN,       .group = INPUT_GROUP_CONTROL },
+    { .id = Input_CycleStart,     .port = &CycleStart,     .pin = CYCLE_START_PIN,     .group = INPUT_GROUP_CONTROL },
+#if SAFETY_DOOR_ENABLE
+    { .id = Input_SafetyDoor,     .port = &SafetyDoor,     .pin = SAFETY_DOOR_PIN,     .group = INPUT_GROUP_CONTROL },
 #endif
-    { .id = Input_Probe,        .port = &Probe,        .pin = PROBE_PIN,         .group = INPUT_GROUP_PROBE },
-    { .id = Input_LimitX,       .port = &LimitX,       .pin = X_LIMIT_PIN,       .group = INPUT_GROUP_LIMIT },
+#if defined(LIMITS_OVERRIDE_PIN)
+    { .id = Input_LimitsOverride, .port = &LimitsOverride, .pin = LIMITS_OVERRIDE_PIN, .group = INPUT_GROUP_CONTROL },
+#endif
+    { .id = Input_Probe,          .port = &Probe,          .pin = PROBE_PIN,           .group = INPUT_GROUP_PROBE },
+    { .id = Input_LimitX,         .port = &LimitX,         .pin = X_LIMIT_PIN,         .group = INPUT_GROUP_LIMIT },
 #ifdef X2_LIMIT_PIN
-    { .id = Input_LimitX_Max,   .port = &LimitX2,      .pin = X2_LIMIT_PIN,      .group = INPUT_GROUP_LIMIT },
+    { .id = Input_LimitX_Max,     .port = &LimitX2,        .pin = X2_LIMIT_PIN,        .group = INPUT_GROUP_LIMIT },
 #endif
-    { .id = Input_LimitY,       .port = &LimitY,       .pin = Y_LIMIT_PIN,       .group = INPUT_GROUP_LIMIT },
+    { .id = Input_LimitY,         .port = &LimitY,         .pin = Y_LIMIT_PIN,         .group = INPUT_GROUP_LIMIT },
 #ifdef Y2_LIMIT_PIN
-    { .id = Input_LimitY_Max,   .port = &LimitY2,      .pin = Y2_LIMIT_PIN,      .group = INPUT_GROUP_LIMIT },
+    { .id = Input_LimitY_Max,     .port = &LimitY2,        .pin = Y2_LIMIT_PIN,        .group = INPUT_GROUP_LIMIT },
 #endif
-    { .id = Input_LimitZ,       .port = &LimitZ,       .pin = Z_LIMIT_PIN,       .group = INPUT_GROUP_LIMIT }
+    { .id = Input_LimitZ,         .port = &LimitZ,         .pin = Z_LIMIT_PIN,         .group = INPUT_GROUP_LIMIT }
 #ifdef Z2_LIMIT_PIN
-  , { .id = Input_LimitZ_Max,   .port = &LimitZ2,      .pin = Z2_LIMIT_PIN,      .group = INPUT_GROUP_LIMIT }
+  , { .id = Input_LimitZ_Max,     .port = &LimitZ2,        .pin = Z2_LIMIT_PIN,        .group = INPUT_GROUP_LIMIT }
 #endif
 #ifdef A_LIMIT_PIN
-  , { .id = Input_LimitA,       .port = &LimitA,       .pin = A_LIMIT_PIN,       .group = INPUT_GROUP_LIMIT }
+  , { .id = Input_LimitA,         .port = &LimitA,         .pin = A_LIMIT_PIN,         .group = INPUT_GROUP_LIMIT }
 #endif
 #ifdef B_LIMIT_PIN
-  , { .id = Input_LimitB,       .port = &LimitB,       .pin = B_LIMIT_PIN,       .group = INPUT_GROUP_LIMIT }
+  , { .id = Input_LimitB,         .port = &LimitB,         .pin = B_LIMIT_PIN,         .group = INPUT_GROUP_LIMIT }
+#endif
+#ifdef C_LIMIT_PIN
+  , { .id = Input_LimitC,         .port = &LimitC,         .pin = C_LIMIT_PIN,         .group = INPUT_GROUP_LIMIT }
 #endif
 #if MPG_MODE_ENABLE
-  ,  { .id = Input_ModeSelect,  .port = &ModeSelect,   .pin = MODE_PIN,          .group = INPUT_GROUP_MPG }
+  ,  { .id = Input_ModeSelect,    .port = &ModeSelect,     .pin = MODE_PIN,            .group = INPUT_GROUP_MPG }
 #endif
 #if KEYPAD_ENABLE && defined(KEYPAD_STROBE_PIN)
-  , { .id = Input_KeypadStrobe, .port = &KeypadStrobe, .pin = KEYPAD_STROBE_PIN, .group = INPUT_GROUP_KEYPAD }
+  , { .id = Input_KeypadStrobe,   .port = &KeypadStrobe,   .pin = KEYPAD_STROBE_PIN,   .group = INPUT_GROUP_KEYPAD }
 #endif
 #ifdef SPINDLE_INDEX_PIN
-  , { .id = Input_SpindleIndex, .port = &SpindleIndex, .pin = SPINDLE_INDEX_PIN, .group = INPUT_GROUP_SPINDLE_INDEX }
+  , { .id = Input_SpindleIndex,   .port = &SpindleIndex,   .pin = SPINDLE_INDEX_PIN,   .group = INPUT_GROUP_SPINDLE_INDEX }
 #endif
 #if QEI_ENABLE
-  , { .id = Input_QEI_A,        .port = &QEI_A,        .pin = QEI_A_PIN,         .group = INPUT_GROUP_QEI }
-  , { .id = Input_QEI_B,        .port = &QEI_B,        .pin = QEI_B_PIN,         .group = INPUT_GROUP_QEI }
+  , { .id = Input_QEI_A,          .port = &QEI_A,          .pin = QEI_A_PIN,           .group = INPUT_GROUP_QEI }
+  , { .id = Input_QEI_B,          .port = &QEI_B,          .pin = QEI_B_PIN,           .group = INPUT_GROUP_QEI }
   #if QEI_SELECT_ENABLED
-  , { .id = Input_QEI_Select,   .port = &QEI_Select,   .pin = QEI_SELECT_PIN,    .group = INPUT_GROUP_QEI_SELECT }
+  , { .id = Input_QEI_Select,     .port = &QEI_Select,     .pin = QEI_SELECT_PIN,      .group = INPUT_GROUP_QEI_SELECT }
   #endif
   #if QEI_INDEX_ENABLED
-  , { .id = Input_QEI_Index,    .port = &QEI_Index,    .pin = QEI_INDEX_PIN,     .group = INPUT_GROUP_QEI }
+  , { .id = Input_QEI_Index,      .port = &QEI_Index,      .pin = QEI_INDEX_PIN,       .group = INPUT_GROUP_QEI }
   #endif
 #endif
 };
-
-#define DIGITAL_OUT(gpio, on) { if(on) gpio.reg->DR_SET = gpio.bit; else gpio.reg->DR_CLEAR = gpio.bit; } 
 
 #if USB_SERIAL_CDC || QEI_ENABLE
 #define ADD_MSEVENT 1
@@ -292,10 +317,13 @@ static volatile bool ms_event = false;
 #else
 #define ADD_MSEVENT 0
 #endif
-static bool IOInitDone = false, probe_invert = false;
+static bool IOInitDone = false;
 static uint16_t pulse_length, pulse_delay;
 static axes_signals_t next_step_outbits;
 static delay_t grbl_delay = { .ms = 0, .callback = NULL };
+static probe_state_t probe = {
+    .connected = On
+};
 #ifdef SQUARING_ENABLED
 static axes_signals_t motors_1 = {AXES_BITMASK}, motors_2 = {AXES_BITMASK};
 #endif
@@ -550,6 +578,9 @@ inline static __attribute__((always_inline)) void set_step_outputs (axes_signals
 #ifdef B_AXIS
     DIGITAL_OUT(stepB, step_outbits.b);
 #endif
+#ifdef C_AXIS
+    DIGITAL_OUT(stepC, step_outbits.c);
+#endif
 }
 #endif
 
@@ -580,6 +611,9 @@ inline static __attribute__((always_inline)) void set_dir_outputs (axes_signals_
 #endif
 #ifdef B_AXIS
     DIGITAL_OUT(dirB, dir_outbits.b);
+#endif
+#ifdef C_AXIS
+    DIGITAL_OUT(dirC, dir_outbits.c);
 #endif
 }
 
@@ -621,6 +655,9 @@ static void stepperEnable (axes_signals_t enable)
 #endif
 #ifdef B_ENABLE_PIN
     DIGITAL_OUT(enableB, enable.b)
+#endif
+#ifdef C_ENABLE_PIN
+    DIGITAL_OUT(enableC, enable.c)
 #endif
 }
 
@@ -861,7 +898,9 @@ inline static axes_signals_t limitsGetState()
 #ifdef B_LIMIT_PIN
     signals_min.b = (LimitB.reg->DR & LimitB.bit) != 0;
 #endif
-
+#ifdef C_LIMIT_PIN
+    signals_min.c = (LimitC.reg->DR & LimitC.bit) != 0;
+#endif
 
     if (settings.limits.invert.mask) {
         signals_min.value ^= settings.limits.invert.mask;
@@ -891,7 +930,9 @@ inline static axes_signals_t limitsGetState()
     #ifdef B_LIMIT_PIN
         signals.b = (LimitB.reg->DR & LimitB.bit) != 0;
     #endif
-
+    #ifdef C_LIMIT_PIN
+        signals.c = (LimitC.reg->DR & LimitC.bit) != 0;
+    #endif
         if (settings.limits.invert.mask)
             signals.value ^= settings.limits.invert.mask;
 
@@ -994,7 +1035,7 @@ static void limitsEnable (bool on, bool homing)
     } while(i);
 
 #ifdef SQUARING_ENABLED
-    hal.limits.get_state = homing ? limitsGetHomeState : limitsGetState;
+    hal.homing.get_state = homing ? limitsGetHomeState : limitsGetState;
 #endif
 }
 
@@ -1016,12 +1057,16 @@ inline static control_signals_t systemGetState (void)
 #endif
     signals.feed_hold = (FeedHold.reg->DR & FeedHold.bit) != 0;
     signals.cycle_start = (CycleStart.reg->DR & CycleStart.bit) != 0;
-#if defined(ENABLE_SAFETY_DOOR_INPUT_PIN) && defined(SAFETY_DOOR_PIN)
+#if SAFETY_DOOR_ENABLE
     signals.safety_door_ajar = (SafetyDoor.reg->DR & SafetyDoor.bit) != 0;
 #endif
 
     if(settings.control_invert.value)
         signals.value ^= settings.control_invert.value;
+
+#ifdef LIMITS_OVERRIDE_PIN
+    signals.limits_override = (LimitsOverride.reg->DR & LimitsOverride.bit) == 0;
+#endif
 
     return signals;
 }
@@ -1029,22 +1074,20 @@ inline static control_signals_t systemGetState (void)
 // Sets up the probe pin invert mask to
 // appropriately set the pin logic according to setting for normal-high/normal-low operation
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
-static void probeConfigure (bool is_probe_away, bool probing)
+static void probeConfigure(bool is_probe_away, bool probing)
 {
-    probe_invert = !settings.probe.invert_probe_pin;
-
-    if (is_probe_away)
-        probe_invert = !probe_invert;
+    probe.triggered = Off;
+    probe.is_probing = probing;
+    probe.inverted = is_probe_away ? !settings.probe.invert_probe_pin : settings.probe.invert_probe_pin;
 }
 
 // Returns the probe connected and triggered pin states.
 probe_state_t probeGetState (void)
 {
-    probe_state_t state = {
-        .connected = On
-    };
+    probe_state_t state = {0};
 
-    state.triggered = ((Probe.reg->DR & Probe.bit) != 0) ^ probe_invert;
+    state.connected = probe.connected;
+    state.triggered = !!(Probe.reg->DR & Probe.bit) ^ probe.inverted;
 
     return state;
 }
@@ -1316,9 +1359,9 @@ static coolant_state_t coolantGetState (void)
 }
 
 #if ETHERNET_ENABLE
-static void reportIP (void)
+static void reportIP (bool newopt)
 {
-    if(services.telnet || services.websocket) {
+    if(!newopt && (services.telnet || services.websocket)) {
         hal.stream.write("[NETCON:");
         hal.stream.write(services.telnet ? "Telnet" : "Websocket");
         hal.stream.write("]" ASCII_EOL);
@@ -1479,12 +1522,19 @@ static void settings_changed (settings_t *settings)
                     signal->irq_mode = control_fei.cycle_start ? IRQ_Mode_Falling : IRQ_Mode_Rising;
                     break;
 
+#if SAFETY_DOOR_ENABLE
                 case Input_SafetyDoor:
                     pullup = !settings->control_disable_pullup.safety_door_ajar;
                     signal->debounce = hal.driver_cap.software_debounce;
                     signal->irq_mode = control_fei.safety_door_ajar ? IRQ_Mode_Falling : IRQ_Mode_Rising;
                     break;
-
+#endif
+#ifdef LIMITS_OVERRIDE_PIN
+                case Input_LimitsOverride:
+                    pullup = true;
+                    signal->debounce = false;
+                    break;
+#endif
                 case Input_Probe:
                     pullup = hal.driver_cap.probe_pull_up;
                     break;
@@ -1517,6 +1567,13 @@ static void settings_changed (settings_t *settings)
 #ifdef B_LIMIT_PIN
                 case Input_LimitB:
                 case Input_LimitB_Max:
+                    pullup = !settings->limits.disable_pullup.b;
+                    signal->irq_mode = limit_fei.b ? IRQ_Mode_Falling : IRQ_Mode_Rising;
+                    break;
+#endif
+#ifdef C_LIMIT_PIN
+                case Input_LimitC:
+                case Input_LimitC_Max:
                     pullup = !settings->limits.disable_pullup.b;
                     signal->irq_mode = limit_fei.b ? IRQ_Mode_Falling : IRQ_Mode_Rising;
                     break;
@@ -1778,6 +1835,14 @@ static bool driver_setup (settings_t *settings)
   #endif
 #endif
 
+#ifdef C_AXIS
+    pinModeOutput(&stepC, C_STEP_PIN);
+    pinModeOutput(&dirC, C_DIRECTION_PIN);
+  #ifdef C_ENABLE_PIN
+    pinModeOutput(&enableC, C_ENABLE_PIN);
+  #endif
+#endif
+
 #ifdef STEPPERS_ENABLE_PIN
     pinModeOutput(&steppersEnable, STEPPERS_ENABLE_PIN);
 #endif
@@ -1905,7 +1970,7 @@ static bool driver_setup (settings_t *settings)
 
   // Set defaults
 
-    IOInitDone = settings->version == 18;
+    IOInitDone = settings->version == 19;
 
     hal.settings_changed(settings);
     hal.stepper.go_idle(true);
@@ -2037,24 +2102,12 @@ bool driver_init (void)
 #if USB_SERIAL_CDC == 2
     strcat(options, "USB.2 ");
 #endif
-#if KEYPAD
-    strcat(options, "KEYPAD ");
-#endif
-#if IOPORTS_ENABLE
-    strcat(options, "IOPORTS ");
-#endif
-#if SPINDLE_HUANYANG
-    strcat(options, "HUANYANG ");
-#endif
-#if PLASMA_ENABLE
-    strcat(options, "PLASMA ");
-#endif
 
     if(*options != '\0')
         options[strlen(options) - 1] = '\0';
 
-    hal.info = "IMXRT1062";
-    hal.driver_version = "201014";
+    hal.info = "iMXRT1062";
+    hal.driver_version = "201225";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
 #endif
@@ -2077,6 +2130,7 @@ bool driver_init (void)
 
     hal.limits.enable = limitsEnable;
     hal.limits.get_state = limitsGetState;
+    hal.homing.get_state = limitsGetState;
 
     hal.coolant.set_state = coolantSetState;
     hal.coolant.get_state = coolantGetState;
@@ -2141,17 +2195,21 @@ bool driver_init (void)
 #endif
 
 #if MODBUS_ENABLE
-    serialInit(19200);
-
-    modbus_stream.rx_timeout = 500;
     modbus_stream.write = serialWrite;
     modbus_stream.read = serialGetC;
     modbus_stream.flush_rx_buffer = serialRxFlush;
     modbus_stream.flush_tx_buffer = serialTxFlush;
     modbus_stream.get_rx_buffer_count = serialRxCount;
     modbus_stream.get_tx_buffer_count = serialTxCount;
+    modbus_stream.set_baud_rate = serialSetBaudRate;
 
-    modbus_init(&modbus_stream);
+    bool modbus = modbus_init(&modbus_stream);
+
+#if SPINDLE_HUANYANG
+    if(modbus)
+        huanyang_init(&modbus_stream);
+#endif
+
 #endif
 
   // Driver capabilities, used for announcing and negotiating (with Grbl) driver functionality.
@@ -2169,8 +2227,11 @@ bool driver_init (void)
 #if ESTOP_ENABLE
     hal.driver_cap.e_stop = On;
 #endif
-#ifdef SAFETY_DOOR_PIN
+#if SAFETY_DOOR_ENABLE
     hal.driver_cap.safety_door = On;
+#endif
+#ifdef LIMITS_OVERRIDE_PIN
+    hal.driver_cap.limits_override = On;
 #endif
     hal.driver_cap.software_debounce = On;
     hal.driver_cap.step_pulse_delay = On;
@@ -2202,10 +2263,6 @@ bool driver_init (void)
 
 #if QEI_ENABLE
     qei_enable = encoder_init(QEI_ENABLE);
-#endif
-
-#if SPINDLE_HUANYANG
-    huanyang_init(&modbus_stream);
 #endif
 
 #if PLASMA_ENABLE
