@@ -338,7 +338,7 @@ static void spindle_set_speed (uint_fast16_t pwm_value);
 
 //static void stepper_driver_isr (void);
 void stepper_driver_isr (void);
-static void stepper_pulse_isr (void);
+void stepper_pulse_isr (void);
 static void stepper_pulse_isr_delayed (void);
 static void mode_select_isr (void);
 #if CNC_BOOSTERPACK
@@ -570,7 +570,13 @@ static void stepperCyclesPerTick (uint32_t cycles_per_tick)
   #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
     TimerLoadSet(STEPPER_TIMER_BASE, TIMER_A, cycles_per_tick < (1UL << 23) ? cycles_per_tick : (1UL << 23) - 1UL);
   #else
-    TimerLoadSet(STEPPER_TIMER_BASE, TIMER_A, cycles_per_tick < (1UL << 26) ? cycles_per_tick : (1UL << 26) - 1UL);
+    static uint32_t last_cycles_per_tick = 0;
+    if (cycles_per_tick > (1UL << 26)) cycles_per_tick = (1UL << 26) - 1UL;
+    // pulse jitter fix
+    if (last_cycles_per_tick != cycles_per_tick >> 2) {
+        last_cycles_per_tick = cycles_per_tick >> 2;
+        TimerLoadSet(STEPPER_TIMER_BASE, TIMER_A, cycles_per_tick);
+    }
   #endif
 #endif
 #else
@@ -1786,7 +1792,7 @@ void stepper_driver_isr (void)
 // a step. This ISR resets the motor port after a short period (settings.pulse_microseconds)
 // completing one step cycle.
 // NOTE: TivaC has a shared interrupt for match and timeout
-static void stepper_pulse_isr (void)
+void stepper_pulse_isr (void)
 {
     TimerIntClear(PULSE_TIMER_BASE, TIMER_TIMA_TIMEOUT);
     set_step_outputs((axes_signals_t){0});

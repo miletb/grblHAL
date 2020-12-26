@@ -62,6 +62,7 @@ extern void xPortSysTickHandler(void);
 extern void SerialPort1IntHandler(void);
 extern void SerialPort0IntHandler(void);
 extern void stepper_driver_isr(void);
+extern void stepper_pulse_isr(void);
 
 //*****************************************************************************
 //
@@ -109,9 +110,9 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // ADC Sequence 2
     IntDefaultHandler,                      // ADC Sequence 3
     IntDefaultHandler,                      // Watchdog timer
-    IntDefaultHandler,                      // Timer 0 subtimer A
+    stepper_pulse_isr,                      // Timer 0 subtimer A
     IntDefaultHandler,                      // Timer 0 subtimer B
-    stepper_driver_isr,                      // Timer 1 subtimer A
+    stepper_driver_isr,                     // Timer 1 subtimer A
     IntDefaultHandler,                      // Timer 1 subtimer B
     IntDefaultHandler,                      // Timer 2 subtimer A
     IntDefaultHandler,                      // Timer 2 subtimer B

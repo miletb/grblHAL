@@ -27,7 +27,7 @@
 #include "driverlib/sysctl.h"
 
 #include "base/driver.h"
-#include "GRBL/grbllib.h"
+#include "grbl/grbllib.h"
 
 #include "FreeRTOS.h"
 #include "task.h"

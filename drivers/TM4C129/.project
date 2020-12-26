@@ -80,7 +80,7 @@
 	<variableList>
 		<variable>
 			<name>SW_ROOT</name>
-			<value>file:/Users/milutinkitic/ti/tivaware_c_series_2_1_4_178</value>
+			<value>file:/home/milutinkitic/ti/tivaware_c_series_2_1_4_178</value>
 		</variable>
 	</variableList>
 </projectDescription>
