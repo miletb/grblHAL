@@ -568,7 +568,13 @@ static void stepperCyclesPerTick (uint32_t cycles_per_tick)
 #else
 // Limit min steps/s to about 2 (hal.f_step_timer @ 120 MHz)
   #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
-    TimerLoadSet(STEPPER_TIMER_BASE, TIMER_A, cycles_per_tick < (1UL << 23) ? cycles_per_tick : (1UL << 23) - 1UL);
+    static uint32_t last_cycles_per_tick = 0;
+    if (cycles_per_tick > (1UL << 23)) cycles_per_tick = (1UL << 23) - 1UL;
+    // pulse jitter fix
+    if (last_cycles_per_tick != cycles_per_tick >> 2) {
+        last_cycles_per_tick = cycles_per_tick >> 2;
+        TimerLoadSet(STEPPER_TIMER_BASE, TIMER_A, cycles_per_tick);
+    }
   #else
     static uint32_t last_cycles_per_tick = 0;
     if (cycles_per_tick > (1UL << 26)) cycles_per_tick = (1UL << 26) - 1UL;
@@ -1194,7 +1200,7 @@ static void settings_changed (settings_t *settings)
         } else
             hal.stepper.pulse_start = stepperPulseStart;
 
-        TimerIntRegister(PULSE_TIMER_BASE, TIMER_A, stepper_pulse_isr);
+        //TimerIntRegister(PULSE_TIMER_BASE, TIMER_A, stepper_pulse_isr);
         TimerIntEnable(PULSE_TIMER_BASE, TIMER_TIMA_TIMEOUT);
 
       #if LASER_PPI
@@ -1375,32 +1381,28 @@ static bool driver_setup (settings_t *settings)
   #if USE_PIOSC
     TimerClockSourceSet(STEPPER_TIMER_BASE, TIMER_CLOCK_PIOSC);
   #endif
-    //--------------PAZI-----------TimerConfigure(STEPPER_TIMER_BASE, TIMER_CFG_PERIODIC);
+    TimerConfigure(STEPPER_TIMER_BASE, TIMER_CFG_PERIODIC);
 #else
     TimerConfigure(STEPPER_TIMER_BASE, TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A_PERIODIC);
     TimerPrescaleSet(STEPPER_TIMER_BASE, TIMER_A, STEPPER_DRIVER_PRESCALER); // 20 MHz step timer clock
 #endif
-//    IntPrioritySet(STEPPER_TIMER_INT, 0x20);                    // lower priority than for step timer (which resets the step-dir signal)
-//    TimerControlStall(STEPPER_TIMER_BASE, STEPPER_TIMER, true); // timer will stall in debug mode
-//    TimerIntRegister(STEPPER_TIMER_BASE, STEPPER_TIMER, stepper_driver_isr);
-//    TimerIntClear(STEPPER_TIMER_BASE, 0xFFFF);
-//    IntPendClear(STEPPER_TIMER_INT);
-//    TimerIntEnable(STEPPER_TIMER_BASE, TIMER_TIMA_TIMEOUT);
-
-    ROM_TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC);
-    ROM_TimerLoadSet(TIMER1_BASE, TIMER_A, 0x1000);
-    ROM_IntEnable(INT_TIMER1A);
-    ROM_TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
-    //ROM_TimerEnable(TIMER1_BASE, TIMER_A);
+    IntPrioritySet(STEPPER_TIMER_INT, 0x20);                    // lower priority than for step timer (which resets the step-dir signal)
+    TimerControlStall(STEPPER_TIMER_BASE, STEPPER_TIMER, true); // timer will stall in debug mode
+    TimerIntClear(STEPPER_TIMER_BASE, 0xFFFF);
+    IntPendClear(STEPPER_TIMER_INT);
+    TimerIntEnable(STEPPER_TIMER_BASE, TIMER_TIMA_TIMEOUT);
+    //TimerIntRegister(STEPPER_TIMER_BASE, STEPPER_TIMER, stepper_driver_isr);
+    IntEnable(STEPPER_TIMER_INT);
 
     // Configure step pulse timer
-//  TimerClockSourceSet(PULSE_TIMER_BASE, TIMER_CLOCK_SYSTEM);
-    TimerConfigure(PULSE_TIMER_BASE, TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A_ONE_SHOT);
-    IntPrioritySet(PULSE_TIMER_INT, 0x00);              // highest priority - higher than for stepper timer
-    TimerControlStall(PULSE_TIMER_BASE, TIMER_A, true); // timer will stall in debug mode
-    TimerIntClear(PULSE_TIMER_BASE, 0xFFFF);
-    IntPendClear(PULSE_TIMER_INT);
-    TimerPrescaleSet(PULSE_TIMER_BASE, TIMER_A, STEPPER_PULSE_PRESCALER); // for 0.1uS per count
+ //  TimerClockSourceSet(PULSE_TIMER_BASE, TIMER_CLOCK_SYSTEM);
+     TimerConfigure(PULSE_TIMER_BASE, TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A_ONE_SHOT);
+     IntPrioritySet(PULSE_TIMER_INT, 0x00);              // highest priority - higher than for stepper timer
+     TimerControlStall(PULSE_TIMER_BASE, TIMER_A, true); // timer will stall in debug mode
+     TimerIntClear(PULSE_TIMER_BASE, 0xFFFF);
+     IntPendClear(PULSE_TIMER_INT);
+     TimerPrescaleSet(PULSE_TIMER_BASE, TIMER_A, STEPPER_PULSE_PRESCALER); // for 1uS per count
+     IntEnable(PULSE_TIMER_INT);
 
 #if CNC_BOOSTERPACK_A4998
     GPIOPinTypeGPIOOutput(STEPPERS_VDD_PORT, STEPPERS_VDD_PIN);
