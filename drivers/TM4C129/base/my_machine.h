@@ -33,7 +33,7 @@
 
 #ifdef BOARD_CNC_BOOSTERPACK
 //#define CNC_BOOSTERPACK_SHORTS  1 // Shorts added to BoosterPack for some signals (for faster and simpler driver)
-#define CNC_BOOSTERPACK_A4998   1 // Using Polulu A4998 drivers - for suppying VDD via GPIO (PE5)
+#define CNC_BOOSTERPACK_A4998   0 // Using Polulu A4998 drivers - for suppying VDD via GPIO (PE5)
 #endif
 
 #if ETHERNET_ENABLE
