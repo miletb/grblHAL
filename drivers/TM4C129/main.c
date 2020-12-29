@@ -43,6 +43,8 @@ static void vGrblTask (void * pvParameters)
     grbl_enter();
 }
 
+void vApplicationStackOverflowHook () {};
+
 int main(void)
 {
     g_ui32SysClock = SysCtlClockFreqSet(SYSCTL_XTAL_25MHZ|SYSCTL_OSC_MAIN|SYSCTL_USE_PLL|SYSCTL_CFG_VCO_480, configCPU_CLOCK_HZ);

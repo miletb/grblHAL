@@ -104,12 +104,12 @@
 
 // Define user-control CONTROLs (cycle start, reset, feed hold) input pins.
 #define CONTROL_PORT_FH_CS GPIO_PORTL_BASE
-#define CONTROL_PORT_RST   GPIO_PORTF_BASE
-#define CONTROL_PORT_SD    GPIO_PORTG_BASE
-#define RESET_PIN          GPIO_PIN_3
+#define CONTROL_PORT_RST   GPIO_PORTA_BASE
+#define CONTROL_PORT_SD    GPIO_PORTA_BASE
+#define RESET_PIN          GPIO_PIN_4
 #define FEED_HOLD_PIN      GPIO_PIN_4
 #define CYCLE_START_PIN    GPIO_PIN_5
-#define SAFETY_DOOR_PIN    GPIO_PIN_0
+#define SAFETY_DOOR_PIN    GPIO_PIN_5
 #define HWCONTROL_MASK     (RESET_PIN|FEED_HOLD_PIN|CYCLE_START_PIN|SAFETY_DOOR_PIN)
 
 // Define probe switch input pin.

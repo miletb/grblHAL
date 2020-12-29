@@ -55,12 +55,9 @@ extern uint32_t __STACK_TOP;
 //
 //*****************************************************************************
 
-extern void lwIPEthernetIntHandler(void);
 extern void xPortPendSVHandler(void);
 extern void vPortSVCHandler(void);
 extern void xPortSysTickHandler(void);
-extern void SerialPort1IntHandler(void);
-extern void SerialPort0IntHandler(void);
 extern void stepper_driver_isr(void);
 extern void stepper_pulse_isr(void);
 
@@ -131,7 +128,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // I2C1 Master and Slave
     IntDefaultHandler,                      // CAN0
     IntDefaultHandler,                      // CAN1
-    lwIPEthernetIntHandler,                 // Ethernet
+    IntDefaultHandler,                      // Ethernet
     IntDefaultHandler,                      // Hibernate
     IntDefaultHandler,                      // USB0
     IntDefaultHandler,                      // PWM Generator 3

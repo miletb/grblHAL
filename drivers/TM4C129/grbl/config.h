@@ -201,7 +201,7 @@
 // crash due to the lack of available RAM or if the CPU is having trouble keeping up with planning
 // new incoming motions as they are executed.
 // #define BLOCK_BUFFER_SIZE 36 // Uncomment to override default in planner.h.
-#define BLOCK_BUFFER_SIZE 1024 // Uncomment to override default in planner.h.
+#define BLOCK_BUFFER_SIZE 1512 // Uncomment to override default in planner.h.
 
 // Governs the size of the intermediary step segment buffer between the step execution algorithm
 // and the planner blocks. Each segment is set of steps executed at a constant velocity over a
@@ -210,7 +210,7 @@
 // execution lead time there is for other Grbl processes have to compute and do their thing
 // before having to come back and refill this buffer, currently at ~50msec of step moves.
 // #define SEGMENT_BUFFER_SIZE 10 // Uncomment to override default in stepper.h.
-#define SEGMENT_BUFFER_SIZE 128 // Uncomment to override default in stepper.h.
+#define SEGMENT_BUFFER_SIZE 256 // Uncomment to override default in stepper.h.
 
 // Configures the position after a probing cycle during Grbl's check mode. Disabled sets
 // the position to the probe target, when enabled sets the position to the start position.
@@ -573,7 +573,7 @@
 // After homing, Grbl will set by default the entire machine space into negative space, as is typical
 // for professional CNC machines, regardless of where the limit switches are located. Set this
 // define to 1 to force Grbl to always set the machine origin at the homed location despite switch orientation.
-//#define HOMING_FORCE_SET_ORIGIN // Default disabled. Uncomment to enable.
+#define HOMING_FORCE_SET_ORIGIN // Default disabled. Uncomment to enable.
 
 // To prevent the homing cycle from racking the dual axis, when one limit triggers before the
 // other due to switch failure or noise, the homing cycle will automatically abort if the second
