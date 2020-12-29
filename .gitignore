@@ -36,3 +36,4 @@ $RECYCLE.BIN/
 /.idea/
 /drivers/ESP32/build/
 /drivers/ESP32/sdkconfig.old
+/drivers/TM4C129/Debug/
